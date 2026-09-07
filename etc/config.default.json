@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "distributionName": "Alpine-Dockerd",
+  "paths": {
+    "distributionDirectory": "../runtime/dockerd",
+    "dataVhdx": "../runtime/data.vhdx",
+    "downloads": "../runtime/downloads",
+    "logs": "../runtime/logs",
+    "backups": "../runtime/backups"
+  },
+  "storage": {
+    "maximumSizeGB": 256,
+    "label": "dockerd-data",
+    "mountPoint": "/mnt/docker-data",
+    "dockerDataRoot": "/mnt/docker-data/docker"
+  },
+  "startupTask": {
+    "name": "Docker Engine for WSL",
+    "delaySeconds": 30
+  },
+  "windowsCli": {
+    "installWithWinget": true,
+    "hostAlias": "dockerd-wsl",
+    "sshPort": 2222,
+    "sshListenAddress": "127.0.0.1",
+    "setDockerHost": true,
+    "composeExecutable": "docker-compose.exe"
+  },
+  "alpine": {
+    "mirror": "https://dl-cdn.alpinelinux.org/alpine",
+    "releaseChannel": "latest-stable",
+    "architecture": "x86_64",
+    "version": null,
+    "branch": null,
+    "rootfsUrl": null,
+    "rootfsSha256": null
+  }
+}
