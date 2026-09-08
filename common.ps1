@@ -38,18 +38,44 @@ function ConvertTo-PortablePath {
     return $relative
 }
 
+function ConvertTo-WslPath {
+    param([Parameter(Mandatory)][string]$Path)
+    $full = [IO.Path]::GetFullPath($Path)
+    if ($full -notmatch '^(?<drive>[A-Za-z]):\\(?<rest>.*)$') {
+        throw "Solo se admiten rutas locales con letra de unidad para interoperabilidad WSL: $full"
+    }
+    $drive = $Matches.drive.ToLowerInvariant()
+    $rest = $Matches.rest.Replace('\', '/')
+    return "/mnt/$drive/$rest"
+}
+
 function Get-Config {
     if (-not (Test-Path -LiteralPath $script:ConfigPath)) {
         throw "No existe $script:ConfigPath. Ejecute install.ps1 primero."
     }
 
     $config = Get-Content -LiteralPath $script:ConfigPath -Raw | ConvertFrom-Json
+    $defaults = Get-Content -LiteralPath $script:DefaultConfigPath -Raw | ConvertFrom-Json
+    Merge-ConfigDefaults -Target $config -Defaults $defaults
     if ($config.schemaVersion -ne 1) { throw "schemaVersion no soportado: $($config.schemaVersion)" }
     if ([string]::IsNullOrWhiteSpace($config.distributionName)) { throw 'distributionName no puede estar vacío.' }
     if ([string]::IsNullOrWhiteSpace($config.paths.distributionDirectory)) { throw 'paths.distributionDirectory no puede estar vacío.' }
     if ([string]::IsNullOrWhiteSpace($config.paths.dataVhdx)) { throw 'paths.dataVhdx no puede estar vacío.' }
     if (-not $config.paths.dataVhdx.EndsWith('.vhdx', [StringComparison]::OrdinalIgnoreCase)) { throw 'paths.dataVhdx debe terminar en .vhdx.' }
     return $config
+}
+
+function Merge-ConfigDefaults {
+    param([Parameter(Mandatory)]$Target, [Parameter(Mandatory)]$Defaults)
+    foreach ($property in $Defaults.PSObject.Properties) {
+        $existing = $Target.PSObject.Properties[$property.Name]
+        if (-not $existing) {
+            $Target | Add-Member -MemberType NoteProperty -Name $property.Name -Value $property.Value
+        }
+        elseif ($existing.Value -is [pscustomobject] -and $property.Value -is [pscustomobject]) {
+            Merge-ConfigDefaults -Target $existing.Value -Defaults $property.Value
+        }
+    }
 }
 
 function Save-Config {
@@ -132,49 +158,21 @@ mkdir -p '$dataRoot'
 
 function Get-DockerHostValue {
     param([Parameter(Mandatory)]$Config)
-    return "ssh://$($Config.windowsCli.hostAlias)"
+    return "tcp://127.0.0.1:$([int]$Config.windowsCli.tlsPort)"
 }
 
-function Write-ManagedSshConfig {
-    param(
-        [Parameter(Mandatory)]$Config,
-        [Parameter(Mandatory)][string]$PrivateKeyPath
-    )
-
-    $sshDir = Join-Path $HOME '.ssh'
-    $sshConfig = Join-Path $sshDir 'config'
-    New-Item -ItemType Directory -Path $sshDir -Force | Out-Null
-    $begin = '# BEGIN dockerd-wsl (managed)'
-    $end = '# END dockerd-wsl (managed)'
-    $existing = if (Test-Path -LiteralPath $sshConfig) { Get-Content -LiteralPath $sshConfig -Raw } else { '' }
-    $pattern = "(?ms)^$([regex]::Escape($begin))\r?\n.*?^$([regex]::Escape($end))\r?\n?"
-    $existing = [regex]::Replace($existing, $pattern, '').TrimEnd()
-    $keyForSsh = $PrivateKeyPath.Replace('\', '/')
-    $block = @"
-$begin
-Host $($Config.windowsCli.hostAlias)
-    HostName 127.0.0.1
-    Port $($Config.windowsCli.sshPort)
-    User docker
-    IdentityFile $keyForSsh
-    IdentitiesOnly yes
-    BatchMode yes
-    StrictHostKeyChecking accept-new
-$end
-"@
-    (($existing + "`r`n`r`n" + $block).TrimStart()) | Set-Content -LiteralPath $sshConfig -Encoding ascii
-}
-
-function Remove-ManagedSshConfig {
-    $sshConfig = Join-Path (Join-Path $HOME '.ssh') 'config'
-    if (-not (Test-Path -LiteralPath $sshConfig)) { return }
-    $begin = '# BEGIN dockerd-wsl (managed)'
-    $end = '# END dockerd-wsl (managed)'
-    $content = Get-Content -LiteralPath $sshConfig -Raw
-    $pattern = "(?ms)^$([regex]::Escape($begin))\r?\n.*?^$([regex]::Escape($end))\r?\n?"
-    $updated = [regex]::Replace($content, $pattern, '').Trim()
-    if ($updated) { ($updated + "`r`n") | Set-Content -LiteralPath $sshConfig -Encoding ascii }
-    else { Remove-Item -LiteralPath $sshConfig -Force }
+function Set-DockerClientEnvironment {
+    param([Parameter(Mandatory)]$Config, [switch]$Persist)
+    $hostValue = Get-DockerHostValue $Config
+    $certPath = Resolve-ConfiguredPath $Config.paths.clientCertificates
+    $env:DOCKER_HOST = $hostValue
+    $env:DOCKER_TLS_VERIFY = '1'
+    $env:DOCKER_CERT_PATH = $certPath
+    if ($Persist) {
+        [Environment]::SetEnvironmentVariable('DOCKER_HOST', $hostValue, 'User')
+        [Environment]::SetEnvironmentVariable('DOCKER_TLS_VERIFY', '1', 'User')
+        [Environment]::SetEnvironmentVariable('DOCKER_CERT_PATH', $certPath, 'User')
+    }
 }
 
 function Register-DockerdStartupTask {

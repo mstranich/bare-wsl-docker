@@ -46,36 +46,24 @@ function Enable-WslPrerequisites {
         }
     }
 
-    Write-Host 'Verificando cliente OpenSSH de Windows...'
-    $capabilityName = 'OpenSSH.Client~~~~0.0.1.0'
-    $sshQueryOutput = & dism.exe /Online /Get-CapabilityInfo "/CapabilityName:$capabilityName" /English 2>&1
-    $sshQueryExitCode = $LASTEXITCODE
-    if ($sshQueryExitCode -ne 0) {
-        throw "DISM no pudo consultar OpenSSH Client (código $sshQueryExitCode): $($sshQueryOutput -join ' ')"
-    }
-    $sshInstalled = ($sshQueryOutput -join "`n") -match '(?m)^\s*State\s*:\s*Installed\s*$'
-    if (-not $sshInstalled) {
-        Write-Host 'Instalando el cliente OpenSSH de Windows...'
-        $sshInstallOutput = & dism.exe /Online /Add-Capability "/CapabilityName:$capabilityName" /NoRestart /English 2>&1
-        $sshInstallExitCode = $LASTEXITCODE
-        if ($sshInstallExitCode -notin 0, 3010) {
-            throw "DISM no pudo instalar OpenSSH Client (código $sshInstallExitCode): $($sshInstallOutput -join ' ')"
-        }
-        if ($sshInstallExitCode -eq 3010 -or ($sshInstallOutput -join "`n") -match '(?im)^\s*Restart Required\s*:\s*Yes\s*$') {
-            $restartNeeded = $true
-        }
-    }
     return $restartNeeded
 }
 
 function Ensure-WindowsDockerCli {
     param([Parameter(Mandatory)]$Config)
 
+    function Refresh-ProcessPath {
+        $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+        $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+        $env:Path = "$machinePath;$userPath"
+    }
+
     $required = @(
         @{ Command = 'docker.exe'; Id = 'Docker.DockerCLI'; Name = 'Docker CLI' },
         @{ Command = 'docker-compose.exe'; Id = 'Docker.DockerCompose'; Name = 'Docker Compose' },
         @{ Command = 'docker-credential-wincred.exe'; Id = 'Docker.docker-credential-wincred'; Name = 'Docker Credential Helper para Windows' }
     )
+    Refresh-ProcessPath
     foreach ($item in $required) {
         if (Get-Command $item.Command -ErrorAction SilentlyContinue) { continue }
         if (-not $Config.windowsCli.installWithWinget) {
@@ -86,14 +74,24 @@ function Ensure-WindowsDockerCli {
         }
         Write-Host "Instalando $($item.Name) mediante Winget..."
         & winget.exe install --id $item.Id --exact --silent --accept-package-agreements --accept-source-agreements
-        if ($LASTEXITCODE -ne 0) { throw "Winget no pudo instalar $($item.Id)." }
-        $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
-        $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-        $env:Path = "$machinePath;$userPath"
+        $wingetExitCode = $LASTEXITCODE
+        Refresh-ProcessPath
+        if (-not (Get-Command $item.Command -ErrorAction SilentlyContinue)) {
+            throw "Winget no dejó disponible $($item.Command) para $($item.Id) (código $wingetExitCode). Verifique los alias de Winget y el PATH del usuario."
+        }
     }
     if (-not (Get-Command docker.exe -ErrorAction SilentlyContinue)) { throw 'docker.exe no quedó disponible en PATH.' }
     if (-not (Get-Command docker-compose.exe -ErrorAction SilentlyContinue)) { throw 'docker-compose.exe no quedó disponible en PATH.' }
     if (-not (Get-Command docker-credential-wincred.exe -ErrorAction SilentlyContinue)) { throw 'docker-credential-wincred.exe no quedó disponible en PATH.' }
+}
+
+function Enable-ComposeWindowsPathConversion {
+    Write-Host 'Configurando la conversión de rutas de Windows para Docker Compose...'
+    $env:COMPOSE_CONVERT_WINDOWS_PATHS = '1'
+    [Environment]::SetEnvironmentVariable('COMPOSE_CONVERT_WINDOWS_PATHS', '1', 'User')
+    if ([Environment]::GetEnvironmentVariable('COMPOSE_CONVERT_WINDOWS_PATHS', 'User') -ne '1') {
+        throw 'No se pudo persistir COMPOSE_CONVERT_WINDOWS_PATHS=1 para el usuario actual.'
+    }
 }
 
 function Request-RestartDecision {
@@ -147,7 +145,7 @@ function New-ExpandableVhdx {
     param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][int]$MaximumSizeGB)
     if (Test-Path -LiteralPath $Path) { return }
     New-Item -ItemType Directory -Path (Split-Path $Path -Parent) -Force | Out-Null
-    $diskpartFile = Join-Path $env:TEMP "dockerd-wsl-$([guid]::NewGuid().ToString('N')).txt"
+    $diskpartFile = Join-Path $env:TEMP "bare-wsl-docker-$([guid]::NewGuid().ToString('N')).txt"
     try {
         @"
 create vdisk file="$Path" maximum=$($MaximumSizeGB * 1024) type=expandable
@@ -201,6 +199,7 @@ if ($LASTEXITCODE -ne 0) { throw "wsl --update falló con código $LASTEXITCODE.
 if ($LASTEXITCODE -ne 0) { throw 'No se pudo establecer WSL 2 como versión predeterminada.' }
 
 Ensure-WindowsDockerCli $config
+Enable-ComposeWindowsPathConversion
 
 Resolve-AlpineRelease $config
 Save-Config $config
@@ -232,77 +231,74 @@ Invoke-WslScript -Distribution $config.distributionName -Script @"
 set -eux
 printf '%s\n' '$mirror/$branch/main' '$mirror/$branch/community' > /etc/apk/repositories
 apk update
-apk add --no-cache openrc docker docker-cli docker-cli-compose openssh e2fsprogs util-linux ca-certificates
+apk add --no-cache openrc docker docker-cli docker-cli-compose openssl e2fsprogs util-linux ca-certificates
 rc-update add docker default || true
-rc-update add sshd default || true
-if ! id docker >/dev/null 2>&1; then
-  adduser -D -s /bin/ash -G docker docker
-fi
-# OpenSSH rechaza por completo las cuentas bloqueadas, incluso con clave pública.
-# Se deja el campo de contraseña vacío, pero sshd exige exclusivamente publickey.
-passwd -d docker >/dev/null
-mkdir -p /run/openrc /home/docker/.ssh
+rc-service docker stop >/dev/null 2>&1 || true
+mkdir -p /run/openrc
 touch /run/openrc/softlevel
-chown -R docker:docker /home/docker
-chmod 700 /home/docker/.ssh
 mkdir -p /etc/network
 cat > /etc/network/interfaces <<'EOF'
 auto lo
 iface lo inet loopback
 EOF
 cat > /etc/wsl.conf <<'EOF'
+[automount]
+enabled=true
+root=/
+
 [user]
-default=docker
+default=root
 EOF
 "@
 
-$keyPath = Join-Path (Join-Path $HOME '.ssh') 'dockerd-wsl-ed25519'
-$generateKey = -not (Test-Path -LiteralPath $keyPath)
-if (-not $generateKey) {
-    & ssh-keygen.exe -y -P '' -f $keyPath *> $null
-    if ($LASTEXITCODE -ne 0) {
-        $backupSuffix = (Get-Date).ToString('yyyyMMdd-HHmmss')
-        Write-Warning "La clave administrada existente no funciona sin passphrase. Se conservará con sufijo .$backupSuffix.bak y se generará una nueva."
-        Move-Item -LiteralPath $keyPath -Destination "$keyPath.$backupSuffix.bak"
-        if (Test-Path -LiteralPath "$keyPath.pub") {
-            Move-Item -LiteralPath "$keyPath.pub" -Destination "$keyPath.pub.$backupSuffix.bak"
-        }
-        $generateKey = $true
-    }
+# docker-compose.exe convierte H:\ruta en /h/ruta. Reiniciar esta distribución
+# hace que WSL aplique automount.root=/ antes de usar esas rutas.
+Write-Host 'Aplicando la configuración de montaje de unidades de Windows...'
+& wsl.exe --terminate $config.distributionName
+if ($LASTEXITCODE -ne 0) { throw "No se pudo reiniciar la distribución $($config.distributionName)." }
+
+$clientCertDirectory = Resolve-ConfiguredPath $config.paths.clientCertificates
+New-Item -ItemType Directory -Path $clientCertDirectory -Force | Out-Null
+$clientCertDirectoryWsl = (ConvertTo-WslPath $clientCertDirectory) -replace '^/mnt/(?=[a-z]/)', '/'
+$clientDriveMountWsl = '/' + $clientCertDirectoryWsl.Split('/', [StringSplitOptions]::RemoveEmptyEntries)[0]
+$effectiveDriveMount = (Get-WslOutput -Distribution $config.distributionName -Command "findmnt -n -T '$clientCertDirectoryWsl' -o TARGET").Trim()
+if ($effectiveDriveMount -ne $clientDriveMountWsl) {
+    throw "WSL no montó la unidad de $clientCertDirectory en $clientDriveMountWsl (montaje detectado: $effectiveDriveMount)."
 }
-if ($generateKey) {
-    New-Item -ItemType Directory -Path (Split-Path $keyPath -Parent) -Force | Out-Null
-    & ssh-keygen.exe -q -t ed25519 -N '' -C 'dockerd-wsl' -f $keyPath
-    if ($LASTEXITCODE -ne 0) { throw 'No se pudo generar la clave SSH.' }
-}
-$publicKey = (Get-Content -LiteralPath "$keyPath.pub" -Raw).Trim()
-$publicKeyB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($publicKey + "`n"))
-$sshPort = [int]$config.windowsCli.sshPort
-$listenAddress = [string]$config.windowsCli.sshListenAddress
+$tlsDays = [int]$config.tls.validityDays
 Invoke-WslScript -Distribution $config.distributionName -Script @"
 set -eu
-printf '%s' '$publicKeyB64' | base64 -d > /home/docker/.ssh/authorized_keys
-chown docker:docker /home/docker/.ssh/authorized_keys
-chmod 600 /home/docker/.ssh/authorized_keys
-mkdir -p /etc/ssh/sshd_config.d
-grep -q '^Include /etc/ssh/sshd_config.d/\*.conf' /etc/ssh/sshd_config || sed -i '1i Include /etc/ssh/sshd_config.d/*.conf' /etc/ssh/sshd_config
-cat > /etc/ssh/sshd_config.d/99-dockerd-wsl.conf <<'EOF'
-Port $sshPort
-ListenAddress $listenAddress
-PermitRootLogin no
-PasswordAuthentication no
-PermitEmptyPasswords no
-KbdInteractiveAuthentication no
-PubkeyAuthentication yes
-AuthenticationMethods publickey
-AllowUsers docker
+mkdir -p /etc/docker/tls '$clientCertDirectoryWsl'
+if [ ! -s /etc/docker/tls/ca-key.pem ] || [ ! -s /etc/docker/tls/server-key.pem ] || [ ! -s /etc/docker/tls/client/key.pem ]; then
+  rm -f /etc/docker/tls/*.pem /etc/docker/tls/*.csr
+  rm -rf /etc/docker/tls/client
+  mkdir -p /etc/docker/tls/client
+  openssl genrsa -out /etc/docker/tls/ca-key.pem 4096
+  openssl req -new -x509 -days '$tlsDays' -sha256 -key /etc/docker/tls/ca-key.pem -out /etc/docker/tls/ca.pem -subj '/CN=bare-wsl-docker-ca'
+
+  openssl genrsa -out /etc/docker/tls/server-key.pem 4096
+  openssl req -new -sha256 -key /etc/docker/tls/server-key.pem -out /etc/docker/tls/server.csr -subj '/CN=localhost'
+  cat > /etc/docker/tls/server-ext.cnf <<'EOF'
+subjectAltName=DNS:localhost,IP:127.0.0.1
+extendedKeyUsage=serverAuth
 EOF
-ssh-keygen -A
-sshd -t
+  openssl x509 -req -days '$tlsDays' -sha256 -in /etc/docker/tls/server.csr -CA /etc/docker/tls/ca.pem -CAkey /etc/docker/tls/ca-key.pem -CAcreateserial -out /etc/docker/tls/server-cert.pem -extfile /etc/docker/tls/server-ext.cnf
+
+  openssl genrsa -out /etc/docker/tls/client/key.pem 4096
+  openssl req -new -sha256 -key /etc/docker/tls/client/key.pem -out /etc/docker/tls/client/client.csr -subj '/CN=dockerd-windows-client'
+  printf '%s\n' 'extendedKeyUsage=clientAuth' > /etc/docker/tls/client/client-ext.cnf
+  openssl x509 -req -days '$tlsDays' -sha256 -in /etc/docker/tls/client/client.csr -CA /etc/docker/tls/ca.pem -CAkey /etc/docker/tls/ca-key.pem -CAcreateserial -out /etc/docker/tls/client/cert.pem -extfile /etc/docker/tls/client/client-ext.cnf
+  cp /etc/docker/tls/ca.pem /etc/docker/tls/client/ca.pem
+fi
+install -m 0644 /etc/docker/tls/client/ca.pem '$clientCertDirectoryWsl/ca.pem'
+install -m 0644 /etc/docker/tls/client/cert.pem '$clientCertDirectoryWsl/cert.pem'
+install -m 0600 /etc/docker/tls/client/key.pem '$clientCertDirectoryWsl/key.pem'
+chmod 0600 /etc/docker/tls/ca-key.pem /etc/docker/tls/server-key.pem /etc/docker/tls/client/key.pem
 "@
-Write-ManagedSshConfig -Config $config -PrivateKeyPath $keyPath
-$knownHost = "[127.0.0.1]:$([int]$config.windowsCli.sshPort)"
-& ssh-keygen.exe -R $knownHost *> $null
+
+$currentIdentity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+& icacls.exe $clientCertDirectory /inheritance:r /grant:r "${currentIdentity}:(OI)(CI)F" *> $null
+if ($LASTEXITCODE -ne 0) { throw "No se pudieron restringir los permisos de $clientCertDirectory." }
 
 $dataVhdx = Resolve-ConfiguredPath $config.paths.dataVhdx
 $dataVhdExisted = Test-Path -LiteralPath $dataVhdx
@@ -323,21 +319,29 @@ if (-not $dataVhdExisted) {
 
 Mount-DockerDataVhd $config
 $dataRoot = [string]$config.storage.dockerDataRoot
+$tlsPort = [int]$config.windowsCli.tlsPort
 Invoke-WslScript -Distribution $config.distributionName -Script @"
 set -eu
 mkdir -p /etc/docker
 cat > /etc/docker/daemon.json <<'EOF'
 {
-  "data-root": "$dataRoot"
+  "data-root": "$dataRoot",
+  "hosts": [
+    "unix:///var/run/docker.sock",
+    "tcp://127.0.0.1:$tlsPort"
+  ],
+  "tls": true,
+  "tlsverify": true,
+  "tlscacert": "/etc/docker/tls/ca.pem",
+  "tlscert": "/etc/docker/tls/server-cert.pem",
+  "tlskey": "/etc/docker/tls/server-key.pem"
 }
 EOF
 rc-service docker stop >/dev/null 2>&1 || true
-rc-service sshd stop >/dev/null 2>&1 || true
 "@
 
-if ($config.windowsCli.setDockerHost) {
-    [Environment]::SetEnvironmentVariable('DOCKER_HOST', (Get-DockerHostValue $config), 'User')
-    $env:DOCKER_HOST = Get-DockerHostValue $config
+if ($config.windowsCli.setEnvironmentVariables) {
+    Set-DockerClientEnvironment $config -Persist
 }
 
 Register-DockerdStartupTask $config

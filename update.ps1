@@ -19,7 +19,7 @@ if (-not $SkipBackup) {
     New-Item -ItemType Directory -Path $backupDirectory -Force | Out-Null
     $backupPath = Join-Path $backupDirectory "dockerd-$((Get-Date).ToString('yyyyMMdd-HHmmss')).tar"
     Write-Host "Exportando respaldo de la distribución a $backupPath..."
-    Invoke-WslScript -Distribution $config.distributionName -Script 'rc-service docker stop || true; rc-service sshd stop || true'
+    Invoke-WslScript -Distribution $config.distributionName -Script 'rc-service docker stop || true'
     & wsl.exe --terminate $config.distributionName | Out-Null
     & wsl.exe --export $config.distributionName $backupPath
     if ($LASTEXITCODE -ne 0) { throw 'No se pudo exportar el respaldo; la actualización fue cancelada.' }

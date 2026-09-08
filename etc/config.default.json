@@ -1,12 +1,13 @@
 {
   "schemaVersion": 1,
-  "distributionName": "Alpine-Dockerd",
+  "distributionName": "bare-docker",
   "paths": {
-    "distributionDirectory": "../runtime/dockerd",
+    "distributionDirectory": "../runtime/bare-docker",
     "dataVhdx": "../runtime/data.vhdx",
     "downloads": "../runtime/downloads",
     "logs": "../runtime/logs",
-    "backups": "../runtime/backups"
+    "backups": "../runtime/backups",
+    "clientCertificates": "../runtime/certs/client"
   },
   "storage": {
     "maximumSizeGB": 256,
@@ -20,11 +21,12 @@
   },
   "windowsCli": {
     "installWithWinget": true,
-    "hostAlias": "dockerd-wsl",
-    "sshPort": 2222,
-    "sshListenAddress": "127.0.0.1",
-    "setDockerHost": true,
+    "tlsPort": 2376,
+    "setEnvironmentVariables": true,
     "composeExecutable": "docker-compose.exe"
+  },
+  "tls": {
+    "validityDays": 3650
   },
   "alpine": {
     "mirror": "https://dl-cdn.alpinelinux.org/alpine",
