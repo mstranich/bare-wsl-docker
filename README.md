@@ -201,4 +201,6 @@ El archivo `/etc/wsl.conf` de la distribución configura `automount.root=/` para
 
 La memoria y el swap pertenecen a la VM global de WSL 2 y se configuran en `%USERPROFILE%\.wslconfig`, no en estos scripts. El mensaje `WARNING: No swap limit support` se refiere al control de swap por contenedor y no implica que WSL carezca de swap global.
 
-Los cambios en `.wslconfig` requieren detener todas las distribuciones mediante `wsl --shutdown` antes de volver a ejecutar `.\bwd.ps1 start`.
+Como recordatorio, después de modificar `.wslconfig` es necesario ejecutar `wsl --shutdown` para apagar la VM global de WSL 2 y aplicar la nueva configuración en el siguiente inicio. Este comando detiene todas las distribuciones en ejecución.
+
+Después de apagar WSL, el Docker Engine de este proyecto debe iniciarse mediante `.\bwd.ps1 start`. No basta con iniciar la distribución manualmente: este comando adjunta el VHDX de datos, verifica que esté montado correctamente y recién entonces inicia Docker. Sin ese montaje, Docker no puede usar su `data-root` configurado.
