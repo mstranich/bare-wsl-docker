@@ -1,7 +1,7 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$script:RepoRoot = $PSScriptRoot
+$script:RepoRoot = Split-Path $PSScriptRoot -Parent
 $script:ConfigPath = Join-Path $script:RepoRoot 'etc\config.json'
 $script:DefaultConfigPath = Join-Path $script:RepoRoot 'etc\config.default.json'
 
@@ -51,7 +51,7 @@ function ConvertTo-WslPath {
 
 function Get-Config {
     if (-not (Test-Path -LiteralPath $script:ConfigPath)) {
-        throw "No existe $script:ConfigPath. Ejecute install.ps1 primero."
+        throw "No existe $script:ConfigPath. Ejecute .\bwd.ps1 install primero."
     }
 
     $config = Get-Content -LiteralPath $script:ConfigPath -Raw | ConvertFrom-Json
@@ -88,6 +88,17 @@ function Test-DistroExists {
     param([Parameter(Mandatory)][string]$Name)
     $names = & wsl.exe --list --quiet 2>$null
     return @($names | ForEach-Object { (($_ -replace [string][char]0, '')).Trim() }) -contains $Name
+}
+
+function Test-DockerEngineRunning {
+    param([Parameter(Mandatory)]$Config)
+
+    if (-not (Test-DistroExists $Config.distributionName)) {
+        return $false
+    }
+
+    $state = Get-WslOutput -Distribution $Config.distributionName -Command 'rc-service docker status >/dev/null 2>&1 && echo running || true' -AllowFailure
+    return $state -eq 'running'
 }
 
 function Invoke-WslScript {
@@ -179,7 +190,8 @@ function Register-DockerdStartupTask {
     param([Parameter(Mandatory)]$Config)
 
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
-    $actionArgs = "-NoProfile -ExecutionPolicy Bypass -File `"$(Join-Path $script:RepoRoot 'start.ps1')`" -NonInteractive"
+    $managerPath = Join-Path $script:RepoRoot 'bwd.ps1'
+    $actionArgs = "-NoProfile -ExecutionPolicy Bypass -File `"$managerPath`" start -NonInteractive"
     $action = New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -Argument $actionArgs -WorkingDirectory $script:RepoRoot
     $trigger = New-ScheduledTaskTrigger -AtLogOn -User $identity
     $trigger.Delay = "PT$([int]$Config.startupTask.delaySeconds)S"

@@ -2,6 +2,8 @@
 
 Scripts de PowerShell para instalar y mantener Docker Engine dentro de Alpine Linux sobre WSL 2, sin Docker Desktop.
 
+Todas las operaciones se realizan mediante `bwd.ps1`. Los scripts internos se encuentran en `src/` y no necesitan invocarse directamente.
+
 ## Arquitectura
 
 ```text
@@ -54,7 +56,7 @@ El instalador puede habilitar WSL y `VirtualMachinePlatform` cuando WSL todavía
 Desde PowerShell como administrador:
 
 ```powershell
-.\install.ps1
+.\bwd.ps1 install
 ```
 
 La primera ejecución pregunta dónde crear `data.vhdx`. Enter acepta:
@@ -66,7 +68,7 @@ La primera ejecución pregunta dónde crear `data.vhdx`. Enter acepta:
 También puede indicarse sin diálogo:
 
 ```powershell
-.\install.ps1 -DataVhdxPath 'E:\Docker\data.vhdx' -NonInteractive
+.\bwd.ps1 install -DataVhdxPath 'E:\Docker\data.vhdx' -NonInteractive
 ```
 
 La instalación:
@@ -89,16 +91,53 @@ Las terminales abiertas antes de la instalación no reciben automáticamente las
 ## Inicio
 
 ```powershell
-.\start.ps1
+.\bwd.ps1 start
 ```
 
-`start.ps1` monta el VHDX de datos, inicia Docker y espera a que tanto el daemon como la conexión TLS desde Windows estén disponibles. La instalación registra este script como una tarea programada elevada al iniciar sesión, con un retraso predeterminado de 30 segundos.
+`start` monta el VHDX de datos, inicia Docker y espera a que tanto el daemon como la conexión TLS desde Windows estén disponibles. La instalación registra `bwd.ps1 start -NonInteractive` como una tarea programada elevada al iniciar sesión, con un retraso predeterminado de 30 segundos.
 
 El log se guarda en:
 
 ```text
 runtime\logs\start.log
 ```
+
+Para detener Docker ordenadamente:
+
+```powershell
+.\bwd.ps1 stop
+```
+
+Para terminar inmediatamente la distribución WSL, interrumpiendo las operaciones en curso:
+
+```powershell
+.\bwd.ps1 stop -Force
+```
+
+El reinicio realiza un ciclo completo de detención e inicio. `-Force` se aplica a la detención:
+
+```powershell
+.\bwd.ps1 restart
+.\bwd.ps1 restart -Force
+```
+
+## Inicio automático
+
+Para registrar o habilitar la tarea programada sin iniciar Docker Engine:
+
+```powershell
+.\bwd.ps1 enable
+```
+
+`enable` informa si el Engine ya está funcionando o si permanece detenido; habilitar la tarea no cambia su estado actual.
+
+Para deshabilitar el inicio automático sin detener el Engine:
+
+```powershell
+.\bwd.ps1 disable
+```
+
+Si Docker continúa activo, `disable` lo advierte. Use `stop` por separado cuando también quiera detenerlo.
 
 ## Uso
 
@@ -123,13 +162,13 @@ También se verificó la compatibilidad de esta conexión con el cliente externo
 ## Actualización
 
 ```powershell
-.\update.ps1
+.\bwd.ps1 update
 ```
 
 La actualización afecta solamente a Alpine y sus paquetes Docker. Antes de modificar la distribución crea un respaldo en `runtime\backups`, salvo que se indique:
 
 ```powershell
-.\update.ps1 -SkipBackup
+.\bwd.ps1 update -SkipBackup
 ```
 
 No cambia la rama mayor de Alpine, WSL ni los paquetes Winget de Windows.
@@ -137,7 +176,7 @@ No cambia la rama mayor de Alpine, WSL ni los paquetes Winget de Windows.
 ## Desinstalación
 
 ```powershell
-.\uninstall.ps1
+.\bwd.ps1 uninstall
 ```
 
 El script elimina la tarea programada, la distribución, los certificados cliente y las variables de entorno que administra. No desinstala Docker CLI, Compose ni Wincred de Windows.
@@ -145,13 +184,13 @@ El script elimina la tarea programada, la distribución, los certificados client
 Si encuentra `data.vhdx`, pregunta si debe eliminarlo; Enter lo conserva. Para eliminar los datos sin preguntar:
 
 ```powershell
-.\uninstall.ps1 -DeleteDockerData
+.\bwd.ps1 uninstall -DeleteDockerData
 ```
 
 Para eliminar también `etc/config.json`:
 
 ```powershell
-.\uninstall.ps1 -RemoveConfiguration
+.\bwd.ps1 uninstall -RemoveConfiguration
 ```
 
 Eliminar `data.vhdx` destruye permanentemente imágenes, contenedores, volúmenes y metadatos de Docker.
@@ -162,4 +201,4 @@ El archivo `/etc/wsl.conf` de la distribución configura `automount.root=/` para
 
 La memoria y el swap pertenecen a la VM global de WSL 2 y se configuran en `%USERPROFILE%\.wslconfig`, no en estos scripts. El mensaje `WARNING: No swap limit support` se refiere al control de swap por contenedor y no implica que WSL carezca de swap global.
 
-Los cambios en `.wslconfig` requieren detener todas las distribuciones mediante `wsl --shutdown` antes de volver a ejecutar `start.ps1`.
+Los cambios en `.wslconfig` requieren detener todas las distribuciones mediante `wsl --shutdown` antes de volver a ejecutar `.\bwd.ps1 start`.

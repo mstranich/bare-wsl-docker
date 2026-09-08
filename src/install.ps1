@@ -96,7 +96,7 @@ function Enable-ComposeWindowsPathConversion {
 
 function Request-RestartDecision {
     if ($NonInteractive) {
-        Write-Warning 'Windows necesita reiniciarse. Vuelva a ejecutar install.ps1 después del reinicio.'
+        Write-Warning 'Windows necesita reiniciarse. Vuelva a ejecutar .\bwd.ps1 install después del reinicio.'
         exit 3010
     }
     while ($true) {

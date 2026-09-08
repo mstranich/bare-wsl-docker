@@ -42,7 +42,7 @@ if (Test-DistroExists $config.distributionName) {
 
 $distroDirectory = Resolve-ConfiguredPath $config.paths.distributionDirectory
 if (Test-Path -LiteralPath $distroDirectory) {
-    $resolvedRuntime = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot 'runtime'))
+    $resolvedRuntime = [IO.Path]::GetFullPath((Join-Path $script:RepoRoot 'runtime'))
     $resolvedDistro = [IO.Path]::GetFullPath($distroDirectory)
     if ($resolvedDistro.StartsWith($resolvedRuntime.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) {
         Remove-Item -LiteralPath $resolvedDistro -Recurse -Force
