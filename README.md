@@ -157,7 +157,16 @@ D:\projects\example\data → /d/projects/example/data
 
 `docker-credential-wincred.exe` permite que Docker use Windows Credential Manager cuando `%USERPROFILE%\.docker\config.json` contiene `"credsStore": "wincred"`.
 
-También se verificó la compatibilidad de esta conexión con el cliente externo [LazyDocker](https://github.com/jesseduffield/lazydocker); LazyDocker no forma parte del proyecto ni es instalado por estos scripts.
+## Clientes de terceros probados
+
+Los siguientes clientes externos se probaron con la conexión TLS mutua configurada por el instalador. No forman parte del proyecto ni son instalados por estos scripts:
+
+| Cliente | Tipo | Resultado |
+| --- | --- | --- |
+| [LazyDocker](https://github.com/jesseduffield/lazydocker) | TUI | Compatible. |
+| [Sidekick Docker for VS Code](https://marketplace.visualstudio.com/items?itemName=CesarAndresLopez.sidekick-docker-vscode) | GUI integrada en VS Code | Compatible. |
+
+Ambos usan la interfaz Docker configurada mediante `DOCKER_HOST`, `DOCKER_TLS_VERIFY` y `DOCKER_CERT_PATH`; no requieren instalar un cliente dentro de Alpine.
 
 ## Actualización
 
