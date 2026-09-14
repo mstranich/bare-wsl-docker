@@ -7,6 +7,6 @@ $stopArguments = @{}
 if ($Force) { $stopArguments.Force = $true }
 
 & (Join-Path $PSScriptRoot 'stop.ps1') @stopArguments
-if (-not $?) { throw 'No se pudo detener Docker Engine; no se intentará iniciarlo.' }
+if (-not $?) { throw 'Could not stop Docker Engine; it will not be started.' }
 
 & (Join-Path $PSScriptRoot 'start.ps1')

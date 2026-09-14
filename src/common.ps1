@@ -9,7 +9,7 @@ function Assert-Administrator {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = [Security.Principal.WindowsPrincipal]::new($identity)
     if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-        throw 'Este script debe ejecutarse desde PowerShell con privilegios de administrador.'
+        throw 'This script must be run from PowerShell with administrator privileges.'
     }
 }
 
@@ -42,7 +42,7 @@ function ConvertTo-WslPath {
     param([Parameter(Mandatory)][string]$Path)
     $full = [IO.Path]::GetFullPath($Path)
     if ($full -notmatch '^(?<drive>[A-Za-z]):\\(?<rest>.*)$') {
-        throw "Solo se admiten rutas locales con letra de unidad para interoperabilidad WSL: $full"
+        throw "Only local paths with a drive letter are supported for WSL interoperability: $full"
     }
     $drive = $Matches.drive.ToLowerInvariant()
     $rest = $Matches.rest.Replace('\', '/')
@@ -51,17 +51,17 @@ function ConvertTo-WslPath {
 
 function Get-Config {
     if (-not (Test-Path -LiteralPath $script:ConfigPath)) {
-        throw "No existe $script:ConfigPath. Ejecute .\bwd.ps1 install primero."
+        throw "Does not exist $script:ConfigPath. Run .\bwd.ps1 install first."
     }
 
     $config = Get-Content -LiteralPath $script:ConfigPath -Raw | ConvertFrom-Json
     $defaults = Get-Content -LiteralPath $script:DefaultConfigPath -Raw | ConvertFrom-Json
     Merge-ConfigDefaults -Target $config -Defaults $defaults
-    if ($config.schemaVersion -ne 1) { throw "schemaVersion no soportado: $($config.schemaVersion)" }
-    if ([string]::IsNullOrWhiteSpace($config.distributionName)) { throw 'distributionName no puede estar vacío.' }
-    if ([string]::IsNullOrWhiteSpace($config.paths.distributionDirectory)) { throw 'paths.distributionDirectory no puede estar vacío.' }
-    if ([string]::IsNullOrWhiteSpace($config.paths.dataVhdx)) { throw 'paths.dataVhdx no puede estar vacío.' }
-    if (-not $config.paths.dataVhdx.EndsWith('.vhdx', [StringComparison]::OrdinalIgnoreCase)) { throw 'paths.dataVhdx debe terminar en .vhdx.' }
+    if ($config.schemaVersion -ne 1) { throw "unsupported schemaVersion: $($config.schemaVersion)" }
+    if ([string]::IsNullOrWhiteSpace($config.distributionName)) { throw 'distributionName must not be empty.' }
+    if ([string]::IsNullOrWhiteSpace($config.paths.distributionDirectory)) { throw 'paths.distributionDirectory must not be empty.' }
+    if ([string]::IsNullOrWhiteSpace($config.paths.dataVhdx)) { throw 'paths.dataVhdx must not be empty.' }
+    if (-not $config.paths.dataVhdx.EndsWith('.vhdx', [StringComparison]::OrdinalIgnoreCase)) { throw 'paths.dataVhdx must end in .vhdx.' }
     return $config
 }
 
@@ -111,7 +111,7 @@ function Invoke-WslScript {
     $bytes = [Text.Encoding]::UTF8.GetBytes(($Script -replace "`r`n", "`n"))
     $base64 = [Convert]::ToBase64String($bytes)
     & wsl.exe -d $Distribution -u $User -- sh -lc "printf '%s' '$base64' | base64 -d | sh"
-    if ($LASTEXITCODE -ne 0) { throw "Falló un comando dentro de $Distribution (código $LASTEXITCODE)." }
+    if ($LASTEXITCODE -ne 0) { throw "A command failed inside $Distribution (exit code $LASTEXITCODE)." }
 }
 
 function Get-WslOutput {
@@ -125,7 +125,7 @@ function Get-WslOutput {
     $output = & wsl.exe -d $Distribution -u $User -- sh -lc $Command 2>$null
     $exitCode = $LASTEXITCODE
     if ($exitCode -ne 0 -and -not $AllowFailure) {
-        throw "Falló '$Command' dentro de $Distribution (código $exitCode)."
+        throw "Failed '$Command' inside $Distribution (exit code $exitCode)."
     }
     return ($output -join "`n").Trim()
 }
@@ -157,7 +157,7 @@ function Get-WindowsHostAddress {
         return $gateway
     }
 
-    throw 'No se pudo determinar una dirección IPv4 de Windows alcanzable desde los contenedores.'
+    throw 'Could not determine an IPv4 address for Windows reachable from the containers.'
 }
 
 function Set-DockerDaemonConfiguration {
@@ -169,7 +169,7 @@ function Set-DockerDaemonConfiguration {
     $parsed = $null
     if (-not [Net.IPAddress]::TryParse($WindowsHostAddress, [ref]$parsed) -or
         $parsed.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork) {
-        throw "La dirección de Windows no es una IPv4 válida: $WindowsHostAddress"
+        throw "The Windows address is not a valid IPv4 address: $WindowsHostAddress"
     }
 
     $daemonConfig = [ordered]@{
@@ -211,7 +211,7 @@ function Mount-DockerDataVhd {
     $vhdx = Resolve-ConfiguredPath $Config.paths.dataVhdx
     $label = [string]$Config.storage.label
 
-    if (-not (Test-Path -LiteralPath $vhdx)) { throw "No existe el VHDX de datos: $vhdx" }
+    if (-not (Test-Path -LiteralPath $vhdx)) { throw "The Data VHDX: $vhdx" }
     & wsl.exe -d $name -u root -- true | Out-Null
 
     $device = Get-WslOutput -Distribution $name -Command "blkid -L '$label' 2>/dev/null || true" -AllowFailure
@@ -221,7 +221,7 @@ function Mount-DockerDataVhd {
             Start-Sleep -Seconds 1
             $device = Get-WslOutput -Distribution $name -Command "blkid -L '$label' 2>/dev/null || true" -AllowFailure
             if ([string]::IsNullOrWhiteSpace($device)) {
-                throw "No se pudo adjuntar $vhdx. wsl.exe informó: $($mountOutput -join ' ')"
+                throw "Could not attach $vhdx. wsl.exe reported: $($mountOutput -join ' ')"
             }
         }
     }
@@ -271,5 +271,5 @@ function Register-DockerdStartupTask {
     $trigger.Delay = "PT$([int]$Config.startupTask.delaySeconds)S"
     $principal = New-ScheduledTaskPrincipal -UserId $identity -LogonType Interactive -RunLevel Highest
     $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 5) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
-    Register-ScheduledTask -TaskName $Config.startupTask.name -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description 'Monta el VHDX de datos e inicia Docker Engine dentro de WSL.' -Force | Out-Null
+    Register-ScheduledTask -TaskName $Config.startupTask.name -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description 'Mounts the data VHDX and starts Docker Engine inside WSL.' -Force | Out-Null
 }

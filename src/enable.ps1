@@ -8,18 +8,18 @@ $task = Get-ScheduledTask -TaskName $config.startupTask.name -ErrorAction Silent
 Register-DockerdStartupTask $config
 
 if (-not $task) {
-    Write-Host "Tarea programada '$($config.startupTask.name)' registrada y habilitada."
+    Write-Host "Scheduled task '$($config.startupTask.name)' registered and enabled."
 }
 elseif ($task.State -eq 'Disabled') {
-    Write-Host "Tarea programada '$($config.startupTask.name)' actualizada y habilitada."
+    Write-Host "Scheduled task '$($config.startupTask.name)' updated and enabled."
 }
 else {
-    Write-Host "Tarea programada '$($config.startupTask.name)' actualizada; ya estaba habilitada."
+    Write-Host "Scheduled task '$($config.startupTask.name)' updated; it was already enabled."
 }
 
 if (Test-DockerEngineRunning $config) {
-    Write-Host 'Docker Engine ya está en funcionamiento.'
+    Write-Host 'Docker Engine is already running.'
 }
 else {
-    Write-Host 'Docker Engine permanece detenido. Puede iniciarlo manualmente mediante .\bwd.ps1 start.'
+    Write-Host 'Docker Engine remains stopped. You can start it manually through .\bwd.ps1 start.'
 }

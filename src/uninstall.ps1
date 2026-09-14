@@ -13,10 +13,10 @@ if (Test-Path -LiteralPath $script:ConfigPath) {
 }
 else {
     if (-not (Test-Path -LiteralPath $script:DefaultConfigPath)) {
-        throw "No existe la configuración local ni $script:DefaultConfigPath."
+        throw "The configuration local ni $script:DefaultConfigPath."
     }
     $config = Get-Content -LiteralPath $script:DefaultConfigPath -Raw | ConvertFrom-Json
-    Write-Host 'No existe configuración local; se usarán los valores predeterminados para completar la limpieza.'
+    Write-Host 'Local configuration does not exist; defaults will be used to complete cleanup.'
 }
 
 $dataVhdx = Resolve-ConfiguredPath $config.paths.dataVhdx
@@ -25,8 +25,8 @@ if (Test-Path -LiteralPath $dataVhdx) {
     $deleteData = [bool]$DeleteDockerData
     if (-not $DeleteDockerData) {
         while ($true) {
-            $answer = (Read-Host "¿Eliminar permanentemente el VHDX de datos ${dataVhdx}? [S/N]").Trim().ToUpperInvariant()
-            if ($answer -eq 'S') { $deleteData = $true; break }
+            $answer = (Read-Host "Permanently delete the data VHDX ${dataVhdx}? [Y/N]").Trim().ToUpperInvariant()
+            if ($answer -eq 'Y') { $deleteData = $true; break }
             if ($answer -eq 'N' -or $answer -eq '') { $deleteData = $false; break }
         }
     }
@@ -47,9 +47,9 @@ if (Test-Path -LiteralPath $dataVhdx) {
 }
 
 if (Test-DistroExists $config.distributionName) {
-    Write-Host "Desregistrando $($config.distributionName)..."
+    Write-Host "Unregistering $($config.distributionName)..."
     & wsl.exe --unregister $config.distributionName
-    if ($LASTEXITCODE -ne 0) { throw 'No se pudo desregistrar la distribución.' }
+    if ($LASTEXITCODE -ne 0) { throw 'Could not unregister the distribution.' }
 }
 
 $distroDirectory = Resolve-ConfiguredPath $config.paths.distributionDirectory
@@ -59,7 +59,7 @@ if (Test-Path -LiteralPath $distroDirectory) {
     if ($resolvedDistro.StartsWith($resolvedRuntime.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) {
         Remove-Item -LiteralPath $resolvedDistro -Recurse -Force
     }
-    else { Write-Warning "No se eliminó el directorio externo: $resolvedDistro" }
+    else { Write-Warning "The external directory was not removed: $resolvedDistro" }
 }
 
 $expectedHost = Get-DockerHostValue $config
@@ -88,12 +88,12 @@ if (Test-Path -LiteralPath $clientCertDirectory) {
 if (Test-Path -LiteralPath $dataVhdx) {
     if ($deleteData) {
         Remove-Item -LiteralPath $dataVhdx -Force
-        Write-Host 'El VHDX de datos fue eliminado.' -ForegroundColor Yellow
+        Write-Host 'The data VHDX was deleted.' -ForegroundColor Yellow
     }
     else {
-        Write-Host "Datos Docker conservados en: $dataVhdx"
+        Write-Host "Docker data preserved at: $dataVhdx"
     }
 }
 
 if ($RemoveConfiguration) { Remove-Item -LiteralPath $script:ConfigPath -Force -ErrorAction SilentlyContinue }
-Write-Host 'Desinstalación completada.' -ForegroundColor Green
+Write-Host 'Uninstallation completed.' -ForegroundColor Green

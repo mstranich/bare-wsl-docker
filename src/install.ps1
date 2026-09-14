@@ -8,7 +8,7 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'common.ps1')
 
 function Enable-WslPrerequisites {
-    Write-Host 'Verificando requisitos de WSL...'
+    Write-Host 'Checking WSL requirements...'
     $restartNeeded = $false
     $wslCommand = Get-Command wsl.exe -ErrorAction SilentlyContinue
     $wslOperational = $false
@@ -21,23 +21,23 @@ function Enable-WslPrerequisites {
     }
 
     if ($wslOperational) {
-        Write-Host 'WSL ya está instalado y operativo; no se modificarán características opcionales de Windows.'
+        Write-Host 'WSL is already installed and operational; optional Windows features will not be modified.'
     }
     else {
         foreach ($featureName in 'Microsoft-Windows-Subsystem-Linux', 'VirtualMachinePlatform') {
-            Write-Host "Verificando $featureName..."
+            Write-Host "Checking $featureName..."
             $queryOutput = & dism.exe /Online /Get-FeatureInfo "/FeatureName:$featureName" /English 2>&1
             $queryExitCode = $LASTEXITCODE
             if ($queryExitCode -ne 0) {
-                throw "DISM no pudo consultar $featureName (código $queryExitCode): $($queryOutput -join ' ')"
+                throw "DISM could not query $featureName (exit code $queryExitCode): $($queryOutput -join ' ')"
             }
             $featureEnabled = ($queryOutput -join "`n") -match '(?m)^\s*State\s*:\s*Enabled\s*$'
             if (-not $featureEnabled) {
-                Write-Host "Habilitando $featureName..."
+                Write-Host "Enabling $featureName..."
                 $enableOutput = & dism.exe /Online /Enable-Feature "/FeatureName:$featureName" /All /NoRestart /English 2>&1
                 $enableExitCode = $LASTEXITCODE
                 if ($enableExitCode -notin 0, 3010) {
-                    throw "DISM no pudo habilitar $featureName (código $enableExitCode): $($enableOutput -join ' ')"
+                    throw "DISM could not enable $featureName (exit code $enableExitCode): $($enableOutput -join ' ')"
                 }
                 if ($enableExitCode -eq 3010 -or ($enableOutput -join "`n") -match '(?im)^\s*Restart Required\s*:\s*Yes\s*$') {
                     $restartNeeded = $true
@@ -117,48 +117,48 @@ function Ensure-WindowsDockerCli {
     $required = @(
         @{ Command = 'docker.exe'; Id = 'Docker.DockerCLI'; Name = 'Docker CLI' },
         @{ Command = 'docker-compose.exe'; Id = 'Docker.DockerCompose'; Name = 'Docker Compose' },
-        @{ Command = 'docker-credential-wincred.exe'; Id = 'Docker.docker-credential-wincred'; Name = 'Docker Credential Helper para Windows' }
+        @{ Command = 'docker-credential-wincred.exe'; Id = 'Docker.docker-credential-wincred'; Name = 'Docker Credential Helper for Windows' }
     )
     Refresh-ProcessPath
     foreach ($item in $required) {
         if (Get-Command $item.Command -ErrorAction SilentlyContinue) { continue }
         if (Enable-WingetPortableCommand -PackageId $item.Id -Command $item.Command) { continue }
         if (-not $Config.windowsCli.installWithWinget) {
-            throw "$($item.Name) no está instalado y windowsCli.installWithWinget es false."
+            throw "$($item.Name) is not installed and windowsCli.installWithWinget is false."
         }
         if (-not (Get-Command winget.exe -ErrorAction SilentlyContinue)) {
-            throw "$($item.Name) no está instalado y winget.exe no está disponible."
+            throw "$($item.Name) is not installed and winget.exe is unavailable."
         }
-        Write-Host "Instalando $($item.Name) mediante Winget..."
+        Write-Host "Installing $($item.Name) through Winget..."
         & winget.exe install --id $item.Id --exact --silent --accept-package-agreements --accept-source-agreements
         $wingetExitCode = $LASTEXITCODE
         Refresh-ProcessPath
         [void](Enable-WingetPortableCommand -PackageId $item.Id -Command $item.Command)
         if (-not (Get-Command $item.Command -ErrorAction SilentlyContinue)) {
-            throw "Winget no dejó disponible $($item.Command) para $($item.Id) (código $wingetExitCode). Verifique los alias de Winget y el PATH del usuario."
+            throw "Winget did not make $($item.Command) available for $($item.Id) (exit code $wingetExitCode)."
         }
     }
-    if (-not (Get-Command docker.exe -ErrorAction SilentlyContinue)) { throw 'docker.exe no quedó disponible en PATH.' }
-    if (-not (Get-Command docker-compose.exe -ErrorAction SilentlyContinue)) { throw 'docker-compose.exe no quedó disponible en PATH.' }
-    if (-not (Get-Command docker-credential-wincred.exe -ErrorAction SilentlyContinue)) { throw 'docker-credential-wincred.exe no quedó disponible en PATH.' }
+    if (-not (Get-Command docker.exe -ErrorAction SilentlyContinue)) { throw 'docker.exe was not made available in PATH.' }
+    if (-not (Get-Command docker-compose.exe -ErrorAction SilentlyContinue)) { throw 'docker-compose.exe was not made available in PATH.' }
+    if (-not (Get-Command docker-credential-wincred.exe -ErrorAction SilentlyContinue)) { throw 'docker-credential-wincred.exe was not made available in PATH.' }
 }
 
 function Enable-ComposeWindowsPathConversion {
-    Write-Host 'Configurando la conversión de rutas de Windows para Docker Compose...'
+    Write-Host 'Configuring Windows path conversion for Docker Compose...'
     $env:COMPOSE_CONVERT_WINDOWS_PATHS = '1'
     [Environment]::SetEnvironmentVariable('COMPOSE_CONVERT_WINDOWS_PATHS', '1', 'User')
     if ([Environment]::GetEnvironmentVariable('COMPOSE_CONVERT_WINDOWS_PATHS', 'User') -ne '1') {
-        throw 'No se pudo persistir COMPOSE_CONVERT_WINDOWS_PATHS=1 para el usuario actual.'
+        throw 'Could not persist COMPOSE_CONVERT_WINDOWS_PATHS=1 for the current user.'
     }
 }
 
 function Request-RestartDecision {
     if ($NonInteractive) {
-        Write-Warning 'Windows necesita reiniciarse. Vuelva a ejecutar .\bwd.ps1 install después del reinicio.'
+        Write-Warning 'Windows must be restarted. Run again .\bwd.ps1 install after the restart.'
         exit 3010
     }
     while ($true) {
-        $answer = (Read-Host 'Windows necesita reiniciarse. [R] Reiniciar ahora, [S] Salir y continuar después').Trim().ToUpperInvariant()
+        $answer = (Read-Host 'Windows must be restarted. [R] Restart now, [S] Exit and continue later').Trim().ToUpperInvariant()
         switch ($answer) {
             'R' { Restart-Computer; exit 3010 }
             'S' { exit 3010 }
@@ -179,19 +179,19 @@ function Resolve-AlpineRelease {
     }
 
     $base = "$($Config.alpine.mirror.TrimEnd('/'))/$($Config.alpine.releaseChannel)/releases/$($Config.alpine.architecture)"
-    Write-Host "Consultando versiones de Alpine en $base..."
+    Write-Host "Checking Alpine versions at $base..."
     $response = Invoke-WebRequest -UseBasicParsing -Uri "$base/"
     $responseText = Get-WebResponseText $response
     $pattern = "alpine-minirootfs-(?<version>\d+\.\d+\.\d+)-$([regex]::Escape([string]$Config.alpine.architecture))\.tar\.gz"
     $matches = [regex]::Matches($responseText, $pattern)
-    if ($matches.Count -eq 0) { throw 'No se pudo localizar Alpine Mini Root Filesystem.' }
+    if ($matches.Count -eq 0) { throw 'Could not locate the Alpine Mini Root Filesystem.' }
     $versions = $matches | ForEach-Object { [version]$_.Groups['version'].Value } | Sort-Object -Descending -Unique
     $version = $versions[0].ToString()
     $fileName = "alpine-minirootfs-$version-$($Config.alpine.architecture).tar.gz"
     $shaResponse = Invoke-WebRequest -UseBasicParsing -Uri "$base/$fileName.sha256"
     $shaText = (Get-WebResponseText $shaResponse).Trim()
     $sha256 = ($shaText -split '\s+')[0].ToUpperInvariant()
-    if ($sha256 -notmatch '^[A-F0-9]{64}$') { throw 'El SHA-256 publicado por Alpine no es válido.' }
+    if ($sha256 -notmatch '^[A-F0-9]{64}$') { throw 'The SHA-256 published by Alpine is invalid.' }
 
     $Config.alpine.version = $version
     $Config.alpine.branch = "v$(([version]$version).Major).$(([version]$version).Minor)"
@@ -214,7 +214,7 @@ exit
 "@ | Set-Content -LiteralPath $diskpartFile -Encoding ascii
         $output = & diskpart.exe /s $diskpartFile 2>&1
         if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $Path)) {
-            throw "DiskPart no pudo crear el VHDX: $($output -join ' ')"
+            throw "DiskPart could not create the VHDX: $($output -join ' ')"
         }
     }
     finally { Remove-Item -LiteralPath $diskpartFile -Force -ErrorAction SilentlyContinue }
@@ -231,18 +231,18 @@ $config = Get-Config
 
 if ($newConfig -and (Test-DistroExists $config.distributionName)) {
     Remove-Item -LiteralPath $script:ConfigPath -Force -ErrorAction SilentlyContinue
-    throw "Ya existe una distribución llamada $($config.distributionName), pero no había configuración local. No se la adoptó automáticamente."
+    throw "A distribution named $($config.distributionName), already exists, but there was no local configuration. It was not adopted automatically."
 }
 
 $defaultDataVhdx = if ($DataVhdxPath) { $DataVhdxPath } else { Resolve-ConfiguredPath $config.paths.dataVhdx }
 if ($newConfig -and -not $DataVhdxPath -and -not $NonInteractive) {
-    $answer = Read-Host "Ruta del VHDX de datos [$defaultDataVhdx]"
+    $answer = Read-Host "Data VHDX path [$defaultDataVhdx]"
     if (-not [string]::IsNullOrWhiteSpace($answer)) { $defaultDataVhdx = $answer.Trim().Trim('"') }
 }
 $defaultDataVhdx = [IO.Path]::GetFullPath($defaultDataVhdx)
-if (-not $defaultDataVhdx.EndsWith('.vhdx', [StringComparison]::OrdinalIgnoreCase)) { throw 'La ruta del VHDX de datos debe terminar en .vhdx.' }
+if (-not $defaultDataVhdx.EndsWith('.vhdx', [StringComparison]::OrdinalIgnoreCase)) { throw 'The data VHDX path must end in .vhdx.' }
 $config.paths.dataVhdx = ConvertTo-PortablePath $defaultDataVhdx
-Write-Host "VHDX de datos: $defaultDataVhdx"
+Write-Host "Data VHDX: $defaultDataVhdx"
 
 $restartNeeded = Enable-WslPrerequisites
 if ($restartNeeded) {
@@ -250,11 +250,11 @@ if ($restartNeeded) {
     Request-RestartDecision
 }
 
-Write-Host 'Actualizando WSL...'
+Write-Host 'Updating WSL...'
 & wsl.exe --update
-if ($LASTEXITCODE -ne 0) { throw "wsl --update falló con código $LASTEXITCODE." }
+if ($LASTEXITCODE -ne 0) { throw "wsl --update failed with exit code $LASTEXITCODE." }
 & wsl.exe --set-default-version 2
-if ($LASTEXITCODE -ne 0) { throw 'No se pudo establecer WSL 2 como versión predeterminada.' }
+if ($LASTEXITCODE -ne 0) { throw 'Could not set WSL 2 as the default version.' }
 
 Ensure-WindowsDockerCli $config
 Enable-ComposeWindowsPathConversion
@@ -268,19 +268,19 @@ foreach ($pathProperty in 'distributionDirectory', 'downloads', 'logs', 'backups
 
 $downloadPath = Join-Path (Resolve-ConfiguredPath $config.paths.downloads) ([IO.Path]::GetFileName([string]$config.alpine.rootfsUrl))
 if (-not (Test-Path -LiteralPath $downloadPath) -or (Get-FileHash -LiteralPath $downloadPath -Algorithm SHA256).Hash -ne $config.alpine.rootfsSha256) {
-    Write-Host "Descargando Alpine $($config.alpine.version)..."
+    Write-Host "Downloading Alpine $($config.alpine.version)..."
     Invoke-WebRequest -UseBasicParsing -Uri $config.alpine.rootfsUrl -OutFile $downloadPath
 }
 if ((Get-FileHash -LiteralPath $downloadPath -Algorithm SHA256).Hash -ne $config.alpine.rootfsSha256) {
     Remove-Item -LiteralPath $downloadPath -Force
-    throw 'La descarga de Alpine no coincide con el SHA-256 oficial.'
+    throw 'The Alpine download does not match the official SHA-256.'
 }
 
 if (-not (Test-DistroExists $config.distributionName)) {
     $distroDir = Resolve-ConfiguredPath $config.paths.distributionDirectory
-    Write-Host "Importando Alpine en $distroDir..."
+    Write-Host "Importing Alpine into $distroDir..."
     & wsl.exe --import $config.distributionName $distroDir $downloadPath --version 2
-    if ($LASTEXITCODE -ne 0) { throw "No se pudo importar $($config.distributionName)." }
+    if ($LASTEXITCODE -ne 0) { throw "Could not import $($config.distributionName)." }
 }
 
 $mirror = $config.alpine.mirror.TrimEnd('/')
@@ -309,11 +309,11 @@ default=root
 EOF
 "@
 
-# docker-compose.exe convierte H:\ruta en /h/ruta. Reiniciar esta distribución
-# hace que WSL aplique automount.root=/ antes de usar esas rutas.
-Write-Host 'Aplicando la configuración de montaje de unidades de Windows...'
+# docker-compose.exe converts H:\path to /h/path. Restarting this distribution
+# makes WSL apply automount.root=/ before using those paths.
+Write-Host 'Applying the Windows drive-mount configuration...'
 & wsl.exe --terminate $config.distributionName
-if ($LASTEXITCODE -ne 0) { throw "No se pudo reiniciar la distribución $($config.distributionName)." }
+if ($LASTEXITCODE -ne 0) { throw "Could not restart the distribution $($config.distributionName)." }
 
 $clientCertDirectory = Resolve-ConfiguredPath $config.paths.clientCertificates
 New-Item -ItemType Directory -Path $clientCertDirectory -Force | Out-Null
@@ -321,7 +321,7 @@ $clientCertDirectoryWsl = (ConvertTo-WslPath $clientCertDirectory) -replace '^/m
 $clientDriveMountWsl = '/' + $clientCertDirectoryWsl.Split('/', [StringSplitOptions]::RemoveEmptyEntries)[0]
 $effectiveDriveMount = (Get-WslOutput -Distribution $config.distributionName -Command "findmnt -n -T '$clientCertDirectoryWsl' -o TARGET").Trim()
 if ($effectiveDriveMount -ne $clientDriveMountWsl) {
-    throw "WSL no montó la unidad de $clientCertDirectory en $clientDriveMountWsl (montaje detectado: $effectiveDriveMount)."
+    throw "WSL did not mount the drive for $clientCertDirectory at $clientDriveMountWsl (detected mount: $effectiveDriveMount)."
 }
 $tlsDays = [int]$config.tls.validityDays
 Invoke-WslScript -Distribution $config.distributionName -Script @"
@@ -356,20 +356,20 @@ chmod 0600 /etc/docker/tls/ca-key.pem /etc/docker/tls/server-key.pem /etc/docker
 
 $currentIdentity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
 & icacls.exe $clientCertDirectory /inheritance:r /grant:r "${currentIdentity}:(OI)(CI)F" *> $null
-if ($LASTEXITCODE -ne 0) { throw "No se pudieron restringir los permisos de $clientCertDirectory." }
+if ($LASTEXITCODE -ne 0) { throw "Could not restrict permissions for $clientCertDirectory." }
 
 $dataVhdx = Resolve-ConfiguredPath $config.paths.dataVhdx
 $dataVhdExisted = Test-Path -LiteralPath $dataVhdx
 if (-not $dataVhdExisted) {
     $before = @((Get-WslOutput -Distribution $config.distributionName -Command "lsblk -dn -o NAME") -split "`r?`n" | Where-Object { $_ } | ForEach-Object { $_.Trim() })
-    Write-Host "Creando $dataVhdx..."
+    Write-Host "Creating $dataVhdx..."
     New-ExpandableVhdx -Path $dataVhdx -MaximumSizeGB ([int]$config.storage.maximumSizeGB)
     & wsl.exe --mount $dataVhdx --vhd --bare
-    if ($LASTEXITCODE -ne 0) { throw 'No se pudo adjuntar el VHDX nuevo.' }
+    if ($LASTEXITCODE -ne 0) { throw 'Could not attach the new VHDX.' }
     Start-Sleep -Seconds 1
     $after = @((Get-WslOutput -Distribution $config.distributionName -Command "lsblk -dn -o NAME") -split "`r?`n" | Where-Object { $_ } | ForEach-Object { $_.Trim() })
     $newDevices = @($after | Where-Object { $before -notcontains $_ })
-    if ($newDevices.Count -ne 1) { throw "No se pudo identificar inequívocamente el nuevo disco WSL: $($newDevices -join ', ')" }
+    if ($newDevices.Count -ne 1) { throw "Could not unambiguously identify the new WSL disk: $($newDevices -join ', ')" }
     $device = "/dev/$($newDevices[0])"
     $label = [string]$config.storage.label
     Invoke-WslScript -Distribution $config.distributionName -Script "set -eux; mkfs.ext4 -F -L '$label' '$device'"
@@ -388,14 +388,14 @@ if ($config.windowsCli.setEnvironmentVariables) {
 
 Register-DockerdStartupTask $config
 & (Join-Path $PSScriptRoot 'start.ps1')
-if ($LASTEXITCODE -ne 0) { throw 'La instalación terminó, pero la validación de inicio falló.' }
+if ($LASTEXITCODE -ne 0) { throw 'Installation finished, but startup validation failed.' }
 
-Write-Host 'Validando descarga y ejecución de contenedores...'
+Write-Host 'Validating download and container execution...'
 & docker.exe run --rm hello-world
-if ($LASTEXITCODE -ne 0) { throw 'Docker Engine está activo, pero la prueba con hello-world falló.' }
+if ($LASTEXITCODE -ne 0) { throw 'Docker Engine is active, but the hello-world test failed.' }
 
 Write-Host ''
-Write-Host 'Instalación completada.' -ForegroundColor Green
-Write-Host "Distribución: $($config.distributionName)"
-Write-Host "Datos Docker: $dataVhdx"
+Write-Host 'Installation completed.' -ForegroundColor Green
+Write-Host "Distribution: $($config.distributionName)"
+Write-Host "Docker data: $dataVhdx"
 Write-Host "DOCKER_HOST: $(Get-DockerHostValue $config)"

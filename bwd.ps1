@@ -27,7 +27,7 @@ $commandParameters = @{
 }
 
 if ([string]::IsNullOrWhiteSpace($Command)) {
-    Write-Host 'Uso: .\bwd.ps1 <install|uninstall|start|update|enable|disable|stop|restart> [argumentos]'
+    Write-Host 'Usage: .\bwd.ps1 <install|uninstall|start|update|enable|disable|stop|restart> [arguments]'
     exit 1
 }
 
@@ -36,14 +36,14 @@ $forward = @{}
 foreach ($name in $PSBoundParameters.Keys) {
     if ($name -eq 'Command') { continue }
     if ($name -notin $allowed) {
-        throw "El argumento -$name no es válido para '$Command'."
+        throw "The argument -$name is not valid for '$Command'."
     }
     $forward[$name] = $PSBoundParameters[$name]
 }
 
 $target = Join-Path $PSScriptRoot "src\$Command.ps1"
 if (-not (Test-Path -LiteralPath $target -PathType Leaf)) {
-    throw "No existe el script interno para '$Command': $target"
+    throw "The internal script for '$Command': $target"
 }
 
 & $target @forward

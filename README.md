@@ -1,10 +1,10 @@
-# Docker Engine en WSL 2 sin Docker Desktop
+# Docker Engine on WSL 2 without Docker Desktop
 
-Scripts de PowerShell para instalar y mantener Docker Engine dentro de Alpine Linux sobre WSL 2, sin Docker Desktop.
+PowerShell scripts to install and maintain Docker Engine inside Alpine Linux on WSL 2, without Docker Desktop.
 
-Todas las operaciones se realizan mediante `bwd.ps1`. Los scripts internos se encuentran en `src/` y no necesitan invocarse directamente.
+All operations are performed through `bwd.ps1`. Internal scripts are located in `src/` and do not need to be invoked directly.
 
-## Arquitectura
+## Architecture
 
 ```text
 Windows
@@ -14,16 +14,16 @@ Windows
 ├─ DOCKER_CERT_PATH=<repo>\runtime\certs\client
 └─ WSL 2
    └─ bare-docker
-      ├─ Docker Engine administrado con OpenRC
-      ├─ API TCP local protegida con TLS mutuo
+      ├─ Docker Engine managed by OpenRC
+      ├─ Local TCP API protected with mutual TLS
       └─ /mnt/docker-data/docker
 ```
 
-Windows conserva los clientes y Alpine ejecuta el daemon. La API solamente escucha en `127.0.0.1:2376` y exige un certificado cliente válido.
+Windows provides the clients and Alpine runs the daemon. The API listens only on `127.0.0.1:2376` and requires a valid client certificate.
 
-Al iniciar, el administrador detecta una dirección IPv4 activa de Windows y configura `host-gateway` dentro de Docker Engine para que los contenedores puedan alcanzar servicios publicados por Windows sin depender de una dirección escrita en el repositorio.
+At startup, the manager detects an active Windows IPv4 address and configures host-gateway inside Docker Engine so containers can reach Windows-published services without relying on a hard-coded repository address.
 
-El sistema y los datos se almacenan por separado:
+The system and data are stored separately:
 
 ```text
 runtime/
@@ -37,113 +37,113 @@ runtime/
 └─ logs/
 ```
 
-- `bare-docker/ext4.vhdx` contiene Alpine y los paquetes instalados.
-- `data.vhdx` contiene imágenes, contenedores, volúmenes y metadatos de Docker.
-- `data.vhdx` se monta antes de iniciar Docker. Si no puede montarse, Docker no se inicia.
-- `certs/client` contiene la CA y el certificado usados por los clientes de Windows.
+- `bare-docker/ext4.vhdx` contains Alpine and installed packages.
+- `data.vhdx` contains Docker images, containers, volumes, and metadata.
+- `data.vhdx` is mounted before Docker starts. If it cannot be mounted, Docker does not start.
+- `certs/client` contains the CA and certificate used by Windows clients.
 
-La configuración efectiva se guarda en `etc/config.json`, creado a partir de `etc/config.default.json`. La configuración local, los VHDX, certificados, descargas, respaldos y logs no se versionan.
+The effective configuration is stored in `etc/config.json`, created from `etc/config.default.json`. Local configuration, VHDX files, certificates, downloads, backups, and logs are not versioned.
 
-## Requisitos
+## Requirements
 
-- Windows 11 con virtualización habilitada.
-- PowerShell ejecutado como administrador.
-- Winget disponible para instalar las herramientas Docker de Windows.
-- Conexión a Internet durante la instalación y las actualizaciones.
+- Windows 11 with virtualization enabled.
+- PowerShell run as administrator.
+- Winget available to install the Windows Docker tools.
+- Internet connection during installation and updates.
 
-El instalador puede habilitar WSL y `VirtualMachinePlatform` cuando WSL todavía no está operativo. Solo solicita reiniciar Windows cuando una modificación necesaria lo requiere.
+The installer can enable WSL and `VirtualMachinePlatform` when WSL is not yet operational. It requests a Windows restart only when a required change makes it necessary.
 
-## Instalación
+## Installation
 
-Desde PowerShell como administrador:
+From PowerShell as administrator:
 
 ```powershell
 .\bwd.ps1 install
 ```
 
-La primera ejecución pregunta dónde crear `data.vhdx`. Enter acepta:
+The first run asks where to create `data.vhdx`. Press Enter to accept:
 
 ```text
 <repo>\runtime\data.vhdx
 ```
 
-También puede indicarse sin diálogo:
+It can also be specified without a prompt:
 
 ```powershell
 .\bwd.ps1 install -DataVhdxPath 'E:\Docker\data.vhdx' -NonInteractive
 ```
 
-La instalación:
+Installation:
 
-1. verifica WSL 2 y actualiza sus componentes;
-2. instala mediante Winget `Docker.DockerCLI`, `Docker.DockerCompose` y `Docker.docker-credential-wincred` si faltan;
-3. descarga y verifica Alpine Mini Root Filesystem;
-4. importa Alpine en `runtime\bare-docker`;
-5. instala Docker Engine, Compose, OpenRC y OpenSSL en Alpine;
-6. configura las unidades Windows como `/c`, `/d`, etc. mediante `automount.root=/`;
-7. activa `COMPOSE_CONVERT_WINDOWS_PATHS=1` para convertir las rutas usadas por Compose;
-8. crea y formatea `data.vhdx` como ext4;
-9. genera una CA y certificados de servidor y cliente;
-10. configura `DOCKER_HOST`, `DOCKER_TLS_VERIFY` y `DOCKER_CERT_PATH` para el usuario de Windows;
-11. registra la tarea programada de inicio;
-12. valida la conexión y ejecuta `hello-world`.
+1. verifies WSL 2 and updates its components;
+2. installs `Docker.DockerCLI`, `Docker.DockerCompose`, and `Docker.docker-credential-wincred` through Winget when they are missing;
+3. downloads and verifies the Alpine Mini Root Filesystem;
+4. imports Alpine into `runtime\bare-docker`;
+5. installs Docker Engine, Compose, OpenRC, and OpenSSL in Alpine;
+6. configures Windows drives as `/c`, `/d`, etc. through `automount.root=/`;
+7. enables `COMPOSE_CONVERT_WINDOWS_PATHS=1` to convert paths used by Compose;
+8. creates and formats `data.vhdx` as ext4;
+9. generates a CA and server and client certificates;
+10. configures `DOCKER_HOST`, `DOCKER_TLS_VERIFY` and `DOCKER_CERT_PATH` for the Windows user;
+11. registers the startup scheduled task;
+12. validates the connection and runs `hello-world`.
 
-Las terminales abiertas antes de la instalación no reciben automáticamente las nuevas variables de entorno. Abra una terminal nueva antes de utilizar los clientes.
+Terminals opened before installation do not automatically receive the new environment variables. Open a new terminal before using the clients.
 
-## Inicio
+## Startup
 
 ```powershell
 .\bwd.ps1 start
 ```
 
-`start` monta el VHDX de datos, inicia Docker y espera a que tanto el daemon como la conexión TLS desde Windows estén disponibles. La instalación registra `bwd.ps1 start -NonInteractive` como una tarea programada elevada al iniciar sesión, con un retraso predeterminado de 30 segundos.
+`start` mounts the data VHDX, starts Docker, and waits until both the daemon and the TLS connection from Windows are available. Installation registers `bwd.ps1 start -NonInteractive` as an elevated scheduled task at sign-in, with a default 30-second delay.
 
-El log se guarda en:
+The log is stored at:
 
 ```text
 runtime\logs\start.log
 ```
 
-Para detener Docker ordenadamente:
+To stop Docker gracefully:
 
 ```powershell
 .\bwd.ps1 stop
 ```
 
-Para terminar inmediatamente la distribución WSL, interrumpiendo las operaciones en curso:
+To immediately terminate the WSL distribution, interrupting in-progress operations:
 
 ```powershell
 .\bwd.ps1 stop -Force
 ```
 
-El reinicio realiza un ciclo completo de detención e inicio. `-Force` se aplica a la detención:
+Restart performs a complete stop-and-start cycle. `-Force` applies to stopping:
 
 ```powershell
 .\bwd.ps1 restart
 .\bwd.ps1 restart -Force
 ```
 
-## Inicio automático
+## Automatic startup
 
-Para registrar o habilitar la tarea programada sin iniciar Docker Engine:
+To register or enable the scheduled task without starting Docker Engine:
 
 ```powershell
 .\bwd.ps1 enable
 ```
 
-`enable` informa si el Engine ya está funcionando o si permanece detenido; habilitar la tarea no cambia su estado actual.
+`enable` reports whether the Engine is already running or remains stopped; enabling the task does not change its current state.
 
-Para deshabilitar el inicio automático sin detener el Engine:
+To disable automatic startup without stopping the Engine:
 
 ```powershell
 .\bwd.ps1 disable
 ```
 
-Si Docker continúa activo, `disable` lo advierte. Use `stop` por separado cuando también quiera detenerlo.
+If Docker remains active, `disable` warns you. Use `stop` separately when you also want to stop it.
 
-## Uso
+## Usage
 
-Desde una terminal nueva del usuario:
+From a new user terminal:
 
 ```powershell
 docker info
@@ -151,15 +151,15 @@ docker run --rm hello-world
 docker-compose.exe version
 ```
 
-Los bind mounts relativos usados por `docker-compose.exe` se convierten de rutas Windows a los montajes DrvFs de Alpine. Por ejemplo:
+Relative bind mounts used by `docker-compose.exe` are converted from Windows paths to Alpine DrvFs mounts. For example:
 
 ```text
 D:\projects\example\data → /d/projects/example/data
 ```
 
-### Acceso desde un contenedor al host Windows
+### Accessing the Windows host from a container
 
-Docker Engine sobre Linux no agrega automáticamente `host.docker.internal` a todos los contenedores. Los contenedores que necesiten acceder a un servicio del host deben declararlo mediante el mecanismo estándar `host-gateway`:
+Docker Engine on Linux does not automatically add `host.docker.internal` to every container. Containers that need to access a service on the host must declare it using the standard `host-gateway` mechanism:
 
 ```yaml
 services:
@@ -168,73 +168,73 @@ services:
       - "host.docker.internal:host-gateway"
 ```
 
-Después pueden usar el nombre sin conocer la dirección de Windows. Por ejemplo:
+They can then use the name without knowing the Windows address. For example:
 
 ```text
 http://host.docker.internal:8096
 ```
 
-`bwd.ps1 start` determina la dirección en cada inicio y genera dentro de `bare-docker` la opción `host-gateway-ips` de `daemon.json`. No modifica `.wslconfig`, el archivo `hosts` de Windows ni la configuración de cada proyecto.
+`bwd.ps1 start` determines the address at each startup and generates the host-gateway-ips option in daemon.json inside bare-docker.
 
-La aplicación de Windows debe escuchar en una dirección alcanzable distinta del loopback estricto y Windows Firewall debe permitir la conexión. Un servicio enlazado exclusivamente a `127.0.0.1` de Windows no resulta accesible mediante este mecanismo.
+The Windows application must listen on a reachable address other than strict loopback, and Windows Firewall must allow the connection.
 
-La declaración de Compose también es compatible con Docker Engine en Linux y con Docker Desktop en Windows o macOS; cada plataforma resuelve `host-gateway` hacia su propio host.
+The Compose declaration is also compatible with Docker Engine on Linux and Docker Desktop on Windows or macOS; each platform resolves host-gateway to its own host.
 
-`docker-credential-wincred.exe` permite que Docker use Windows Credential Manager cuando `%USERPROFILE%\.docker\config.json` contiene `"credsStore": "wincred"`.
+`docker-credential-wincred.exe` lets Docker use Windows Credential Manager when `%USERPROFILE%\.docker\config.json` contains `"credsStore": "wincred"`.
 
-## Clientes de terceros probados
+## Tested third-party clients
 
-Los siguientes clientes externos se probaron con la conexión TLS mutua configurada por el instalador. No forman parte del proyecto ni son instalados por estos scripts:
+The following external clients were tested with the mutual TLS connection configured by the installer. They are not part of the project and are not installed by these scripts:
 
 | Cliente | Tipo | Resultado |
 | --- | --- | --- |
 | [LazyDocker](https://github.com/jesseduffield/lazydocker) | TUI | Compatible. |
 | [Sidekick Docker for VS Code](https://marketplace.visualstudio.com/items?itemName=CesarAndresLopez.sidekick-docker-vscode) | GUI integrada en VS Code | Compatible. |
 
-Ambos usan la interfaz Docker configurada mediante `DOCKER_HOST`, `DOCKER_TLS_VERIFY` y `DOCKER_CERT_PATH`; no requieren instalar un cliente dentro de Alpine.
+Both use the Docker interface configured through `DOCKER_HOST`, `DOCKER_TLS_VERIFY`, and `DOCKER_CERT_PATH`; neither requires a client installed inside Alpine.
 
-## Actualización
+## Update
 
 ```powershell
 .\bwd.ps1 update
 ```
 
-La actualización afecta solamente a Alpine y sus paquetes Docker. Antes de modificar la distribución crea un respaldo en `runtime\backups`, salvo que se indique:
+The update affects only Alpine and its Docker packages. Before modifying the distribution, it creates a backup in `runtime\backups`, unless specified otherwise:
 
 ```powershell
 .\bwd.ps1 update -SkipBackup
 ```
 
-No cambia la rama mayor de Alpine, WSL ni los paquetes Winget de Windows.
+It does not change the Alpine major branch, WSL, or Windows Winget packages.
 
-## Desinstalación
+## Uninstallation
 
 ```powershell
 .\bwd.ps1 uninstall
 ```
 
-El script elimina la tarea programada, la distribución, los certificados cliente y las variables de entorno que administra. No desinstala Docker CLI, Compose ni Wincred de Windows.
+The script removes the scheduled task, distribution, client certificates, and environment variables it manages. It does not uninstall Docker CLI, Compose, or Wincred from Windows.
 
-Si encuentra `data.vhdx`, pregunta si debe eliminarlo; Enter lo conserva. Para eliminar los datos sin preguntar:
+If `data.vhdx` is found, the script asks whether to delete it; pressing Enter preserves it. To delete the data without a prompt:
 
 ```powershell
 .\bwd.ps1 uninstall -DeleteDockerData
 ```
 
-Para eliminar también `etc/config.json`:
+To also remove `etc/config.json`:
 
 ```powershell
 .\bwd.ps1 uninstall -RemoveConfiguration
 ```
 
-Eliminar `data.vhdx` destruye permanentemente imágenes, contenedores, volúmenes y metadatos de Docker.
+Deleting `data.vhdx` permanently destroys Docker images, containers, volumes, and metadata.
 
-## Configuración de WSL
+## WSL configuration
 
-El archivo `/etc/wsl.conf` de la distribución configura `automount.root=/` para alinear los montajes DrvFs con la conversión de rutas de Docker Compose. El instalador reinicia únicamente su distribución para aplicar el cambio.
+The distribution `/etc/wsl.conf` file configures `automount.root=/` to align DrvFs mounts with Docker Compose path conversion. The installer restarts only its distribution to apply the change.
 
-La memoria y el swap pertenecen a la VM global de WSL 2 y se configuran en `%USERPROFILE%\.wslconfig`, no en estos scripts. El mensaje `WARNING: No swap limit support` se refiere al control de swap por contenedor y no implica que WSL carezca de swap global.
+Memory and swap belong to the global WSL 2 VM and are configured in `%USERPROFILE%\.wslconfig`, not in these scripts. The `WARNING: No swap limit support` message refers to per-container swap control and does not mean WSL lacks global swap.
 
-Como recordatorio, después de modificar `.wslconfig` es necesario ejecutar `wsl --shutdown` para apagar la VM global de WSL 2 y aplicar la nueva configuración en el siguiente inicio. Este comando detiene todas las distribuciones en ejecución.
+As a reminder, after modifying `.wslconfig`, you must run `wsl --shutdown` to shut down the global WSL 2 VM and apply the new configuration at the next startup. This command stops all running distributions.
 
-Después de apagar WSL, el Docker Engine de este proyecto debe iniciarse mediante `.\bwd.ps1 start`. No basta con iniciar la distribución manualmente: este comando adjunta el VHDX de datos, verifica que esté montado correctamente y recién entonces inicia Docker. Sin ese montaje, Docker no puede usar su `data-root` configurado.
+After shutting down WSL, this project Docker Engine must be started through `.\bwd.ps1 start`. Starting the distribution manually is not enough: this command attaches the data VHDX, verifies it is mounted correctly, and only then starts Docker. Without that mount, Docker cannot use its configured data-root.

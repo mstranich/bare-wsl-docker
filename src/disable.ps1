@@ -7,16 +7,16 @@ $config = Get-Config
 $task = Get-ScheduledTask -TaskName $config.startupTask.name -ErrorAction SilentlyContinue
 
 if (-not $task) {
-    Write-Host "La tarea programada '$($config.startupTask.name)' no está registrada."
+    Write-Host "The scheduled task '$($config.startupTask.name)' is not registered."
 }
 elseif ($task.State -eq 'Disabled') {
-    Write-Host "La tarea programada '$($config.startupTask.name)' ya está deshabilitada."
+    Write-Host "The scheduled task '$($config.startupTask.name)' is already disabled."
 }
 else {
     Disable-ScheduledTask -TaskName $config.startupTask.name | Out-Null
-    Write-Host "Tarea programada '$($config.startupTask.name)' deshabilitada."
+    Write-Host "Scheduled task '$($config.startupTask.name)' disabled."
 }
 
 if (Test-DockerEngineRunning $config) {
-    Write-Warning 'Docker Engine continúa en funcionamiento. La tarea programada solo controla el inicio automático; use .\bwd.ps1 stop para detener el Engine.'
+    Write-Warning 'Docker Engine is still running. The scheduled task controls only automatic startup; use .\bwd.ps1 stop to stop the Engine.'
 }

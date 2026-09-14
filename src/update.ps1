@@ -6,23 +6,23 @@ $ErrorActionPreference = 'Stop'
 
 Assert-Administrator
 $config = Get-Config
-if (-not (Test-DistroExists $config.distributionName)) { throw "No existe la distribución $($config.distributionName)." }
+if (-not (Test-DistroExists $config.distributionName)) { throw "The distribution $($config.distributionName) does not exist." }
 
 & (Join-Path $PSScriptRoot 'start.ps1') -NonInteractive
-if ($LASTEXITCODE -ne 0) { throw 'No se pudo preparar Docker antes de actualizar.' }
+if ($LASTEXITCODE -ne 0) { throw 'Could not prepare Docker before updating.' }
 
 $before = Get-WslOutput -Distribution $config.distributionName -Command "printf 'Alpine '; cat /etc/alpine-release; docker version --format 'Docker {{.Server.Version}}'; docker compose version"
-Write-Host "Versiones actuales:`n$before"
+Write-Host "Current versions:`n$before"
 
 if (-not $SkipBackup) {
     $backupDirectory = Resolve-ConfiguredPath $config.paths.backups
     New-Item -ItemType Directory -Path $backupDirectory -Force | Out-Null
     $backupPath = Join-Path $backupDirectory "dockerd-$((Get-Date).ToString('yyyyMMdd-HHmmss')).tar"
-    Write-Host "Exportando respaldo de la distribución a $backupPath..."
+    Write-Host "Exporting distribution backup to $backupPath..."
     Invoke-WslScript -Distribution $config.distributionName -Script 'rc-service docker stop || true'
     & wsl.exe --terminate $config.distributionName | Out-Null
     & wsl.exe --export $config.distributionName $backupPath
-    if ($LASTEXITCODE -ne 0) { throw 'No se pudo exportar el respaldo; la actualización fue cancelada.' }
+    if ($LASTEXITCODE -ne 0) { throw 'Could not export the backup; the update was canceled.' }
 }
 
 Mount-DockerDataVhd $config
@@ -37,7 +37,7 @@ apk add --upgrade docker docker-cli docker-cli-compose
 "@
 
 & (Join-Path $PSScriptRoot 'start.ps1') -NonInteractive
-if ($LASTEXITCODE -ne 0) { throw 'La actualización finalizó, pero Docker no volvió a iniciar correctamente.' }
+if ($LASTEXITCODE -ne 0) { throw 'The update finished, but Docker did not start correctly again.' }
 
 $after = Get-WslOutput -Distribution $config.distributionName -Command "printf 'Alpine '; cat /etc/alpine-release; docker version --format 'Docker {{.Server.Version}}'; docker compose version"
-Write-Host "Actualización completada:`n$after" -ForegroundColor Green
+Write-Host "Update completed:`n$after" -ForegroundColor Green
