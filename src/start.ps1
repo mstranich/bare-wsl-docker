@@ -23,6 +23,11 @@ try {
 
     $mountPoint = [string]$config.storage.mountPoint
     $dataRoot = [string]$config.storage.dockerDataRoot
+    $windowsHostAddress = Get-WindowsHostAddress $config
+    Write-Log "Configurando host-gateway para Windows en $windowsHostAddress..."
+    $engineWasRunning = Test-DockerEngineRunning $config
+    $daemonConfigurationChanged = Set-DockerDaemonConfiguration -Config $config -WindowsHostAddress $windowsHostAddress
+
     Write-Log 'Iniciando Docker Engine...'
     Invoke-WslScript -Distribution $config.distributionName -Script @"
 set -eu
@@ -31,10 +36,18 @@ test "`$(findmnt -n -o FSTYPE '$mountPoint')" = ext4
 case '$dataRoot/' in '$mountPoint/'*) ;; *) echo 'data-root está fuera del VHDX' >&2; exit 1;; esac
 mkdir -p /run/openrc
 touch /run/openrc/softlevel
-if ! rc-service docker status >/dev/null 2>&1; then
+if rc-service docker status >/dev/null 2>&1; then
+  if [ '$($daemonConfigurationChanged.ToString().ToLowerInvariant())' = true ]; then
+    rc-service docker restart
+  fi
+else
   rc-service docker start
 fi
 "@
+
+    if ($engineWasRunning -and $daemonConfigurationChanged) {
+        Write-Log 'Docker Engine fue reiniciado para aplicar el nuevo destino de host-gateway.'
+    }
 
     $ready = $false
     for ($i = 0; $i -lt 30; $i++) {
@@ -60,7 +73,7 @@ fi
             throw 'Docker funciona dentro de Alpine, pero docker.exe no pudo conectarse mediante TLS dentro de 30 segundos.'
         }
     }
-    Write-Log 'Docker Engine está listo.'
+    Write-Log "Docker Engine está listo. host-gateway apunta a Windows ($windowsHostAddress)."
     exit 0
 }
 catch {

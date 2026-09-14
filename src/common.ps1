@@ -130,6 +130,80 @@ function Get-WslOutput {
     return ($output -join "`n").Trim()
 }
 
+function Get-WindowsHostAddress {
+    param([Parameter(Mandatory)]$Config)
+
+    $defaultRoutes = @(Get-NetRoute -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue |
+        Where-Object { $_.State -eq 'Alive' } |
+        Sort-Object @{ Expression = { [int]$_.RouteMetric + [int]$_.InterfaceMetric } }, RouteMetric, InterfaceMetric)
+
+    foreach ($route in $defaultRoutes) {
+        $addresses = @(Get-NetIPAddress -AddressFamily IPv4 -InterfaceIndex $route.InterfaceIndex -ErrorAction SilentlyContinue |
+            Where-Object {
+                $_.AddressState -eq 'Preferred' -and
+                -not $_.SkipAsSource -and
+                $_.IPAddress -notmatch '^(127\.|169\.254\.)'
+            })
+        if ($addresses.Count -gt 0) {
+            return [string]$addresses[0].IPAddress
+        }
+    }
+
+    $gateway = Get-WslOutput -Distribution $Config.distributionName -Command "ip -4 route show default | awk 'NR == 1 { print `$3 }'" -AllowFailure
+    $parsed = $null
+    if (-not [string]::IsNullOrWhiteSpace($gateway) -and
+        [Net.IPAddress]::TryParse($gateway, [ref]$parsed) -and
+        $parsed.AddressFamily -eq [Net.Sockets.AddressFamily]::InterNetwork) {
+        return $gateway
+    }
+
+    throw 'No se pudo determinar una dirección IPv4 de Windows alcanzable desde los contenedores.'
+}
+
+function Set-DockerDaemonConfiguration {
+    param(
+        [Parameter(Mandatory)]$Config,
+        [Parameter(Mandatory)][string]$WindowsHostAddress
+    )
+
+    $parsed = $null
+    if (-not [Net.IPAddress]::TryParse($WindowsHostAddress, [ref]$parsed) -or
+        $parsed.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork) {
+        throw "La dirección de Windows no es una IPv4 válida: $WindowsHostAddress"
+    }
+
+    $daemonConfig = [ordered]@{
+        'data-root'       = [string]$Config.storage.dockerDataRoot
+        hosts             = @(
+            'unix:///var/run/docker.sock'
+            "tcp://127.0.0.1:$([int]$Config.windowsCli.tlsPort)"
+        )
+        tls               = $true
+        tlsverify         = $true
+        tlscacert         = '/etc/docker/tls/ca.pem'
+        tlscert           = '/etc/docker/tls/server-cert.pem'
+        tlskey            = '/etc/docker/tls/server-key.pem'
+        'host-gateway-ips' = @($WindowsHostAddress)
+    }
+    $daemonJson = ($daemonConfig | ConvertTo-Json -Depth 5) + "`n"
+    $currentJson = Get-WslOutput -Distribution $Config.distributionName -Command 'cat /etc/docker/daemon.json 2>/dev/null || true' -AllowFailure
+    if (($currentJson.TrimEnd() + "`n") -eq $daemonJson) {
+        return $false
+    }
+
+    $payload = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($daemonJson))
+    Invoke-WslScript -Distribution $Config.distributionName -Script @"
+set -eu
+mkdir -p /etc/docker /run/bare-docker
+printf '%s' '$payload' | base64 -d > /run/bare-docker/daemon.json.new
+dockerd --validate --config-file /run/bare-docker/daemon.json.new >/dev/null
+chmod 600 /run/bare-docker/daemon.json.new
+mv /run/bare-docker/daemon.json.new /run/bare-docker/daemon.json
+ln -sfn /run/bare-docker/daemon.json /etc/docker/daemon.json
+"@
+    return $true
+}
+
 function Mount-DockerDataVhd {
     param([Parameter(Mandatory)]$Config)
 

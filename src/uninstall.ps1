@@ -19,6 +19,19 @@ else {
     Write-Host 'No existe configuración local; se usarán los valores predeterminados para completar la limpieza.'
 }
 
+$dataVhdx = Resolve-ConfiguredPath $config.paths.dataVhdx
+$deleteData = $false
+if (Test-Path -LiteralPath $dataVhdx) {
+    $deleteData = [bool]$DeleteDockerData
+    if (-not $DeleteDockerData) {
+        while ($true) {
+            $answer = (Read-Host "¿Eliminar permanentemente el VHDX de datos ${dataVhdx}? [S/N]").Trim().ToUpperInvariant()
+            if ($answer -eq 'S') { $deleteData = $true; break }
+            if ($answer -eq 'N' -or $answer -eq '') { $deleteData = $false; break }
+        }
+    }
+}
+
 Unregister-ScheduledTask -TaskName $config.startupTask.name -Confirm:$false -ErrorAction SilentlyContinue
 
 if (Test-DistroExists $config.distributionName) {
@@ -29,7 +42,6 @@ if (Test-DistroExists $config.distributionName) {
     & wsl.exe --terminate $config.distributionName 2>$null | Out-Null
 }
 
-$dataVhdx = Resolve-ConfiguredPath $config.paths.dataVhdx
 if (Test-Path -LiteralPath $dataVhdx) {
     & wsl.exe --unmount $dataVhdx 2>$null | Out-Null
 }
@@ -74,15 +86,6 @@ if (Test-Path -LiteralPath $clientCertDirectory) {
 }
 
 if (Test-Path -LiteralPath $dataVhdx) {
-    $deleteData = [bool]$DeleteDockerData
-    if (-not $DeleteDockerData) {
-        while ($true) {
-            $answer = (Read-Host "¿Eliminar permanentemente el VHDX de datos $dataVhdx? [S/N]").Trim().ToUpperInvariant()
-            if ($answer -eq 'S') { $deleteData = $true; break }
-            if ($answer -eq 'N' -or $answer -eq '') { $deleteData = $false; break }
-        }
-    }
-
     if ($deleteData) {
         Remove-Item -LiteralPath $dataVhdx -Force
         Write-Host 'El VHDX de datos fue eliminado.' -ForegroundColor Yellow

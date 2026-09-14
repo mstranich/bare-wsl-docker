@@ -58,6 +58,62 @@ function Ensure-WindowsDockerCli {
         $env:Path = "$machinePath;$userPath"
     }
 
+    function Add-DirectoryToUserPath {
+        param([Parameter(Mandatory)][string]$Directory)
+
+        $fullDirectory = [IO.Path]::GetFullPath($Directory).TrimEnd('\')
+        $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+        $entries = @($userPath -split ';' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        $alreadyPresent = $entries | Where-Object {
+            try {
+                [IO.Path]::GetFullPath([Environment]::ExpandEnvironmentVariables($_)).TrimEnd('\').Equals(
+                    $fullDirectory,
+                    [StringComparison]::OrdinalIgnoreCase
+                )
+            }
+            catch { $false }
+        }
+        if ($alreadyPresent) { return }
+
+        $newUserPath = (@($entries) + $fullDirectory) -join ';'
+        [Environment]::SetEnvironmentVariable('Path', $newUserPath, 'User')
+    }
+
+    function Enable-WingetPortableCommand {
+        param(
+            [Parameter(Mandatory)][string]$PackageId,
+            [Parameter(Mandatory)][string]$Command
+        )
+
+        $wingetRoot = Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet'
+        $searchRoots = @()
+        $linksDirectory = Join-Path $wingetRoot 'Links'
+        if (Test-Path -LiteralPath (Join-Path $linksDirectory $Command) -PathType Leaf) {
+            $searchRoots += $linksDirectory
+        }
+
+        if ($searchRoots.Count -eq 0) {
+            $packagesDirectory = Join-Path $wingetRoot 'Packages'
+            if (Test-Path -LiteralPath $packagesDirectory -PathType Container) {
+                $packageDirectories = @(Get-ChildItem -LiteralPath $packagesDirectory -Directory -Filter "$PackageId`_*" -ErrorAction SilentlyContinue)
+                foreach ($packageDirectory in $packageDirectories) {
+                    $portableExecutable = Get-ChildItem -LiteralPath $packageDirectory.FullName -Recurse -File -Filter $Command -ErrorAction SilentlyContinue |
+                        Sort-Object { $_.FullName.Length } |
+                        Select-Object -First 1
+                    if ($portableExecutable) {
+                        $searchRoots += $portableExecutable.DirectoryName
+                    }
+                }
+            }
+        }
+
+        foreach ($directory in $searchRoots | Select-Object -Unique) {
+            Add-DirectoryToUserPath $directory
+        }
+        if ($searchRoots.Count -gt 0) { Refresh-ProcessPath }
+        return [bool](Get-Command $Command -ErrorAction SilentlyContinue)
+    }
+
     $required = @(
         @{ Command = 'docker.exe'; Id = 'Docker.DockerCLI'; Name = 'Docker CLI' },
         @{ Command = 'docker-compose.exe'; Id = 'Docker.DockerCompose'; Name = 'Docker Compose' },
@@ -66,6 +122,7 @@ function Ensure-WindowsDockerCli {
     Refresh-ProcessPath
     foreach ($item in $required) {
         if (Get-Command $item.Command -ErrorAction SilentlyContinue) { continue }
+        if (Enable-WingetPortableCommand -PackageId $item.Id -Command $item.Command) { continue }
         if (-not $Config.windowsCli.installWithWinget) {
             throw "$($item.Name) no está instalado y windowsCli.installWithWinget es false."
         }
@@ -76,6 +133,7 @@ function Ensure-WindowsDockerCli {
         & winget.exe install --id $item.Id --exact --silent --accept-package-agreements --accept-source-agreements
         $wingetExitCode = $LASTEXITCODE
         Refresh-ProcessPath
+        [void](Enable-WingetPortableCommand -PackageId $item.Id -Command $item.Command)
         if (-not (Get-Command $item.Command -ErrorAction SilentlyContinue)) {
             throw "Winget no dejó disponible $($item.Command) para $($item.Id) (código $wingetExitCode). Verifique los alias de Winget y el PATH del usuario."
         }
@@ -318,25 +376,9 @@ if (-not $dataVhdExisted) {
 }
 
 Mount-DockerDataVhd $config
-$dataRoot = [string]$config.storage.dockerDataRoot
-$tlsPort = [int]$config.windowsCli.tlsPort
 Invoke-WslScript -Distribution $config.distributionName -Script @"
 set -eu
 mkdir -p /etc/docker
-cat > /etc/docker/daemon.json <<'EOF'
-{
-  "data-root": "$dataRoot",
-  "hosts": [
-    "unix:///var/run/docker.sock",
-    "tcp://127.0.0.1:$tlsPort"
-  ],
-  "tls": true,
-  "tlsverify": true,
-  "tlscacert": "/etc/docker/tls/ca.pem",
-  "tlscert": "/etc/docker/tls/server-cert.pem",
-  "tlskey": "/etc/docker/tls/server-key.pem"
-}
-EOF
 rc-service docker stop >/dev/null 2>&1 || true
 "@
 

@@ -21,6 +21,8 @@ Windows
 
 Windows conserva los clientes y Alpine ejecuta el daemon. La API solamente escucha en `127.0.0.1:2376` y exige un certificado cliente válido.
 
+Al iniciar, el administrador detecta una dirección IPv4 activa de Windows y configura `host-gateway` dentro de Docker Engine para que los contenedores puedan alcanzar servicios publicados por Windows sin depender de una dirección escrita en el repositorio.
+
 El sistema y los datos se almacenan por separado:
 
 ```text
@@ -154,6 +156,29 @@ Los bind mounts relativos usados por `docker-compose.exe` se convierten de rutas
 ```text
 D:\projects\example\data → /d/projects/example/data
 ```
+
+### Acceso desde un contenedor al host Windows
+
+Docker Engine sobre Linux no agrega automáticamente `host.docker.internal` a todos los contenedores. Los contenedores que necesiten acceder a un servicio del host deben declararlo mediante el mecanismo estándar `host-gateway`:
+
+```yaml
+services:
+  application:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+```
+
+Después pueden usar el nombre sin conocer la dirección de Windows. Por ejemplo:
+
+```text
+http://host.docker.internal:8096
+```
+
+`bwd.ps1 start` determina la dirección en cada inicio y genera dentro de `bare-docker` la opción `host-gateway-ips` de `daemon.json`. No modifica `.wslconfig`, el archivo `hosts` de Windows ni la configuración de cada proyecto.
+
+La aplicación de Windows debe escuchar en una dirección alcanzable distinta del loopback estricto y Windows Firewall debe permitir la conexión. Un servicio enlazado exclusivamente a `127.0.0.1` de Windows no resulta accesible mediante este mecanismo.
+
+La declaración de Compose también es compatible con Docker Engine en Linux y con Docker Desktop en Windows o macOS; cada plataforma resuelve `host-gateway` hacia su propio host.
 
 `docker-credential-wincred.exe` permite que Docker use Windows Credential Manager cuando `%USERPROFILE%\.docker\config.json` contiene `"credsStore": "wincred"`.
 
