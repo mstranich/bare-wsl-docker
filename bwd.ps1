@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('install', 'uninstall', 'start', 'update', 'enable', 'disable', 'stop', 'restart')]
+    [ValidateSet('install', 'uninstall', 'start', 'update', 'enable', 'disable', 'stop', 'restart', 'expose')]
     [string]$Command,
 
     [string]$DataVhdxPath,
@@ -9,7 +9,9 @@ param(
     [switch]$DeleteDockerData,
     [switch]$RemoveConfiguration,
     [switch]$SkipBackup,
-    [switch]$Force
+    [switch]$Force,
+    [switch]$Watch,
+    [switch]$Clear
 )
 
 Set-StrictMode -Version Latest
@@ -24,10 +26,11 @@ $commandParameters = @{
     disable   = @()
     stop      = @('Force')
     restart   = @('Force')
+    expose    = @('Watch', 'Clear')
 }
 
 if ([string]::IsNullOrWhiteSpace($Command)) {
-    Write-Host 'Usage: .\bwd.ps1 <install|uninstall|start|update|enable|disable|stop|restart> [arguments]'
+    Write-Host 'Usage: .\bwd.ps1 <install|uninstall|start|update|enable|disable|stop|restart|expose> [arguments]'
     exit 1
 }
 

@@ -387,6 +387,7 @@ if ($config.windowsCli.setEnvironmentVariables) {
 }
 
 Register-DockerdStartupTask $config
+Register-LanExposureTask $config
 & (Join-Path $PSScriptRoot 'start.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Installation finished, but startup validation failed.' }
 

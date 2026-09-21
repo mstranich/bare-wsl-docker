@@ -12,8 +12,17 @@ if (-not (Test-DistroExists $config.distributionName)) {
     return
 }
 
+function Remove-LanExposure {
+    Stop-LanExposureWatcher $config
+    $removed = @(Clear-LanExposure $config)
+    if ($removed.Count -gt 0) {
+        Write-Host "Removed LAN exposure for: $(($removed | ForEach-Object { "$_/tcp" }) -join ', ')"
+    }
+}
+
 if ($Force) {
     Write-Warning 'Stopping Docker Engine immediately; in-progress operations will be interrupted.'
+    Remove-LanExposure
     & wsl.exe --terminate $config.distributionName
     if ($LASTEXITCODE -ne 0) { throw "Could not terminate the distribution $($config.distributionName)." }
     Write-Host 'Docker Engine was stopped immediately.'
@@ -21,6 +30,7 @@ if ($Force) {
 }
 
 $engineState = Get-WslOutput -Distribution $config.distributionName -Command 'rc-service docker status >/dev/null 2>&1 && echo running || true' -AllowFailure
+Remove-LanExposure
 if ($engineState -ne 'running') {
     Write-Host 'Docker Engine is already stopped.'
     return

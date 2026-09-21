@@ -6,6 +6,7 @@ Assert-Administrator
 $config = Get-Config
 $task = Get-ScheduledTask -TaskName $config.startupTask.name -ErrorAction SilentlyContinue
 Register-DockerdStartupTask $config
+Register-LanExposureTask $config
 
 if (-not $task) {
     Write-Host "Scheduled task '$($config.startupTask.name)' registered and enabled."

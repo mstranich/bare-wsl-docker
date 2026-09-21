@@ -33,6 +33,9 @@ if (Test-Path -LiteralPath $dataVhdx) {
 }
 
 Unregister-ScheduledTask -TaskName $config.startupTask.name -Confirm:$false -ErrorAction SilentlyContinue
+Stop-LanExposureWatcher $config
+Clear-LanExposure $config | Out-Null
+Unregister-ScheduledTask -TaskName $config.lanExposure.taskName -Confirm:$false -ErrorAction SilentlyContinue
 
 if (Test-DistroExists $config.distributionName) {
     try {

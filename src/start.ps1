@@ -74,6 +74,13 @@ fi
         }
     }
     Write-Log "Docker Engine is ready. host-gateway points to Windows ($windowsHostAddress)."
+
+    if ([bool]$config.lanExposure.enabled) {
+        Write-Log "Exposing published ports on $windowsHostAddress..."
+        foreach ($change in (Sync-LanExposure -Config $config -WindowsHostAddress $windowsHostAddress)) { Write-Log $change }
+        Start-LanExposureWatcher $config
+        Write-Log 'LAN exposure watcher is running.'
+    }
     exit 0
 }
 catch {

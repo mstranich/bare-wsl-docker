@@ -273,3 +273,160 @@ function Register-DockerdStartupTask {
     $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 5) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
     Register-ScheduledTask -TaskName $Config.startupTask.name -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description 'Mounts the data VHDX and starts Docker Engine inside WSL.' -Force | Out-Null
 }
+
+function Invoke-DockerCli {
+    param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)][string[]]$Arguments)
+
+    $docker = Get-Command docker.exe -ErrorAction SilentlyContinue
+    if ($docker) {
+        Set-DockerClientEnvironment $Config
+        $output = & docker.exe @Arguments 2>$null
+        if ($LASTEXITCODE -ne 0) { throw "docker.exe $($Arguments -join ' ') failed (exit code $LASTEXITCODE)." }
+        return @($output)
+    }
+
+    $quoted = ($Arguments | ForEach-Object { "'" + ($_ -replace "'", "'\''") + "'" }) -join ' '
+    $text = Get-WslOutput -Distribution $Config.distributionName -Command "docker $quoted"
+    if ([string]::IsNullOrWhiteSpace($text)) { return @() }
+    return @($text -split "`n")
+}
+
+function Get-PublishedLanPorts {
+    # TCP ports that containers publish on every address (0.0.0.0). Ports bound to 127.0.0.1
+    # stay private on purpose; UDP cannot be forwarded by portproxy and is ignored.
+    param([Parameter(Mandatory)]$Config)
+
+    $ports = [Collections.Generic.HashSet[int]]::new()
+    foreach ($line in (Invoke-DockerCli -Config $Config -Arguments @('ps', '--format', '{{.Ports}}'))) {
+        foreach ($match in [regex]::Matches([string]$line, '0\.0\.0\.0:(?<port>\d+)->\d+/tcp')) {
+            $ports.Add([int]$match.Groups['port'].Value) | Out-Null
+        }
+    }
+    return @($ports | Sort-Object)
+}
+
+function Get-LanExposureRuleName {
+    param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)][int]$Port)
+    return "$($Config.lanExposure.ruleNamePrefix): $Port/tcp"
+}
+
+function Get-ManagedLanPorts {
+    # The firewall rules created by this project are the ledger of what it manages.
+    param([Parameter(Mandatory)]$Config)
+
+    $pattern = '^' + [regex]::Escape("$($Config.lanExposure.ruleNamePrefix): ") + '(?<port>\d+)/tcp$'
+    $ports = @()
+    foreach ($rule in @(Get-NetFirewallRule -ErrorAction SilentlyContinue)) {
+        if ($rule.DisplayName -match $pattern) { $ports += [int]$Matches.port }
+    }
+    return @($ports | Sort-Object -Unique)
+}
+
+function Get-PortProxyEntries {
+    # netsh output is localized; only the four-column address/port rows are parsed.
+    $entries = @()
+    foreach ($line in @(& netsh.exe interface portproxy show v4tov4)) {
+        if ($line -match '^\s*(?<listenAddress>[\d.]+)\s+(?<listenPort>\d+)\s+(?<connectAddress>[\d.]+)\s+(?<connectPort>\d+)\s*$') {
+            $entries += [pscustomobject]@{
+                ListenAddress  = $Matches.listenAddress
+                ListenPort     = [int]$Matches.listenPort
+                ConnectAddress = $Matches.connectAddress
+                ConnectPort    = [int]$Matches.connectPort
+            }
+        }
+    }
+    return $entries
+}
+
+function Remove-LanPortForward {
+    # Only entries that relay into WSL (127.0.0.1, same port) are removed; other portproxies are left alone.
+    param([Parameter(Mandatory)][int]$Port)
+
+    foreach ($entry in @(Get-PortProxyEntries | Where-Object { $_.ListenPort -eq $Port -and $_.ConnectAddress -eq '127.0.0.1' -and $_.ConnectPort -eq $Port })) {
+        & netsh.exe interface portproxy delete v4tov4 listenaddress=$($entry.ListenAddress) listenport=$Port | Out-Null
+    }
+}
+
+function Sync-LanExposure {
+    # Reconciles portproxy entries and firewall rules with the ports currently published on 0.0.0.0.
+    # Returns one description per change so callers can log them.
+    param([Parameter(Mandatory)]$Config, [string]$WindowsHostAddress)
+
+    if (-not [bool]$Config.lanExposure.enabled) { return @() }
+    if ([string]::IsNullOrWhiteSpace($WindowsHostAddress)) { $WindowsHostAddress = Get-WindowsHostAddress $Config }
+
+    $changes = @()
+    $desired = @(Get-PublishedLanPorts $Config)
+    $managed = @(Get-ManagedLanPorts $Config)
+    $profile = [string]$Config.lanExposure.firewallProfile
+
+    foreach ($port in $desired) {
+        $ruleName = Get-LanExposureRuleName -Config $Config -Port $port
+        if (-not (Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue)) {
+            New-NetFirewallRule -DisplayName $ruleName -Description 'Managed by bwd.ps1; removed automatically when the container stops.' -Direction Inbound -Action Allow -Protocol TCP -LocalPort $port -Profile $profile | Out-Null
+            $changes += "firewall: allowed $port/tcp ($profile)"
+        }
+
+        # The listener must be the LAN address: 127.0.0.1:<port> is already taken by the WSL relay.
+        $entries = @(Get-PortProxyEntries | Where-Object { $_.ListenPort -eq $port -and $_.ConnectAddress -eq '127.0.0.1' -and $_.ConnectPort -eq $port })
+        foreach ($stale in @($entries | Where-Object { $_.ListenAddress -ne $WindowsHostAddress })) {
+            & netsh.exe interface portproxy delete v4tov4 listenaddress=$($stale.ListenAddress) listenport=$port | Out-Null
+            $changes += "portproxy: removed $($stale.ListenAddress):$port (address changed)"
+        }
+        if (-not ($entries | Where-Object { $_.ListenAddress -eq $WindowsHostAddress })) {
+            & netsh.exe interface portproxy add v4tov4 listenaddress=$WindowsHostAddress listenport=$port connectaddress=127.0.0.1 connectport=$port | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "netsh could not add the portproxy for ${WindowsHostAddress}:$port." }
+            $changes += "portproxy: ${WindowsHostAddress}:$port -> 127.0.0.1:$port"
+        }
+    }
+
+    foreach ($port in @($managed | Where-Object { $_ -notin $desired })) {
+        Remove-LanPortForward -Port $port
+        Remove-NetFirewallRule -DisplayName (Get-LanExposureRuleName -Config $Config -Port $port) -ErrorAction SilentlyContinue
+        $changes += "removed $port/tcp (no longer published)"
+    }
+
+    return $changes
+}
+
+function Clear-LanExposure {
+    param([Parameter(Mandatory)]$Config)
+
+    $removed = @()
+    foreach ($port in (Get-ManagedLanPorts $Config)) {
+        Remove-LanPortForward -Port $port
+        Remove-NetFirewallRule -DisplayName (Get-LanExposureRuleName -Config $Config -Port $port) -ErrorAction SilentlyContinue
+        $removed += $port
+    }
+    return $removed
+}
+
+function Register-LanExposureTask {
+    # On-demand task without a time limit; start.ps1 launches it and stop.ps1 stops it.
+    param([Parameter(Mandatory)]$Config)
+
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+    $exposePath = Join-Path $script:RepoRoot 'src\expose.ps1'
+    $actionArgs = "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$exposePath`" -Watch"
+    $action = New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -Argument $actionArgs -WorkingDirectory $script:RepoRoot
+    $principal = New-ScheduledTaskPrincipal -UserId $identity -LogonType Interactive -RunLevel Highest
+    $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -Hidden
+    Register-ScheduledTask -TaskName $Config.lanExposure.taskName -Action $action -Principal $principal -Settings $settings -Description 'Follows Docker events and publishes container ports on the Windows LAN address.' -Force | Out-Null
+}
+
+function Start-LanExposureWatcher {
+    param([Parameter(Mandatory)]$Config)
+
+    if (-not [bool]$Config.lanExposure.enabled) { return }
+    $name = [string]$Config.lanExposure.taskName
+    if (-not (Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue)) {
+        Register-LanExposureTask $Config
+    }
+    Stop-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
+    Start-ScheduledTask -TaskName $name
+}
+
+function Stop-LanExposureWatcher {
+    param([Parameter(Mandatory)]$Config)
+    Stop-ScheduledTask -TaskName $Config.lanExposure.taskName -ErrorAction SilentlyContinue
+}

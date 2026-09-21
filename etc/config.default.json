@@ -19,6 +19,12 @@
     "name": "Docker Engine for WSL",
     "delaySeconds": 30
   },
+  "lanExposure": {
+    "enabled": true,
+    "taskName": "Docker Engine for WSL - LAN exposure",
+    "ruleNamePrefix": "bwd LAN",
+    "firewallProfile": "Private"
+  },
   "windowsCli": {
     "installWithWinget": true,
     "tlsPort": 2376,
